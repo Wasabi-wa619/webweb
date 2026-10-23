@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proxify, decodeTarget, rewriteHtml, rewriteCss, rewriteSrcset } from '../lib/rewrite.js';
+import { proxify, decodeTarget, rewriteHtml, rewriteCss, rewriteSrcset, shouldScopeScript } from '../lib/rewrite.js';
 import { CookieJar } from '../lib/cookies.js';
 
 const BASE = 'https://example.com/dir/page.html';
@@ -53,6 +53,30 @@ test('rewriteCss and srcset', () => {
     '@import "/p/https://example.com/dir/a.css"; x{y:url(data:image/png;base64,AA)}');
   assert.equal(rewriteSrcset('data:image/png;base64,A,B 1x,b.png 2x', fn),
     'data:image/png;base64,A,B 1x, /p/https://example.com/dir/b.png 2x');
+});
+
+test('shouldScopeScript only targets classic scripts using location', () => {
+  assert.equal(shouldScopeScript('var x = location.pathname;'), true);
+  assert.equal(shouldScopeScript('f(top, parent);'), true);
+  assert.equal(shouldScopeScript('console.log("hi");'), false, 'no location ref');
+  assert.equal(shouldScopeScript('import x from "y"; location.href;'), false, 'module');
+  assert.equal(shouldScopeScript('export const a = location;'), false, 'module');
+  assert.equal(shouldScopeScript('const m = await import("./x"); location;'), false, 'dynamic import');
+});
+
+test('rewriteHtml wraps eligible inline scripts only when scriptScope is on', () => {
+  const html = `<script>a = location.pathname</script>
+<script type="module">b = location.pathname</script>
+<script src="/x.js"></script>
+<script type="application/json">{"location":1}</script>
+<script>plain()</script>`;
+  const on = rewriteHtml(html, BASE, { scriptScope: true });
+  assert.match(on, /<script>with\(window.__pxScope\|\|\{\}\)\{\na = location.pathname\n\}<\/script>/);
+  assert.match(on, /<script type="module">b = location.pathname<\/script>/, 'module untouched');
+  assert.match(on, /<script type="application\/json">\{"location":1\}<\/script>/, 'json untouched');
+  assert.match(on, /<script>plain\(\)<\/script>/, 'no location ref untouched');
+  const off = rewriteHtml(html, BASE, { scriptScope: false });
+  assert.doesNotMatch(off, /__pxScope/);
 });
 
 test('CookieJar domain/path/expiry/httpOnly', () => {

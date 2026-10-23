@@ -411,5 +411,140 @@
     },
   });
 
-  window.__px = { rw, unproxy, targetUrl };
+  // ---- location / window / document の読み取りを対象サイトの値に見せる ----
+  // サーバー側で一部の <script> を with(window.__pxScope){...} で包み、
+  // コード中の裸の location / window.location / document.location などが
+  // プロキシのURLではなく本来のサイトのURLを返すようにする。
+  const LOC_URL_PROPS = new Set(['href', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'origin']);
+  const locCache = new WeakMap();
+
+  function targetFor(win) {
+    try {
+      if (win === window) return targetUrl();
+      if (win && win.__px && win.__px.targetUrl) return win.__px.targetUrl();
+      if (win) return new URL(unproxy(win.location.href));
+    } catch {}
+    return targetUrl();
+  }
+
+  function makeLocation(win) {
+    let p = locCache.get(win);
+    if (p) return p;
+    const real = win.location;
+    const navTo = (href) => real.assign(href); // assign は rw 済み
+    p = new Proxy(real, {
+      get(t, prop) {
+        if (prop === 'assign' || prop === 'replace') return (u) => real[prop](u);
+        if (prop === 'reload') return () => real.reload();
+        if (prop === 'toString' || prop === 'href') {
+          const href = targetFor(win).href;
+          return prop === 'href' ? href : () => href;
+        }
+        if (prop === 'hash') return real.hash;
+        if (LOC_URL_PROPS.has(prop)) {
+          try {
+            return targetFor(win)[prop];
+          } catch {
+            return Reflect.get(t, prop);
+          }
+        }
+        const v = Reflect.get(t, prop);
+        return typeof v === 'function' ? v.bind(real) : v;
+      },
+      set(t, prop, v) {
+        if (prop === 'href') {
+          navTo(v);
+        } else if (prop === 'hash') {
+          real.hash = v; // 同一ページ内のフラグメント
+        } else if (LOC_URL_PROPS.has(prop)) {
+          try {
+            const u = targetFor(win);
+            u[prop] = v;
+            navTo(rw(u.href));
+          } catch {}
+        } else {
+          try {
+            real[prop] = v;
+          } catch {}
+        }
+        return true;
+      },
+    });
+    locCache.set(win, p);
+    return p;
+  }
+
+  const pxLocation = makeLocation(window);
+
+  const winCache = new WeakMap();
+  function winProxy(win) {
+    if (!win || typeof win !== 'object') return win;
+    let p = winCache.get(win);
+    if (p) return p;
+    p = new Proxy(win, {
+      get(t, prop) {
+        switch (prop) {
+          case 'location': return makeLocation(win);
+          case 'window': case 'self': case 'globalThis': return winProxy(win);
+          case 'top': return winProxy(win.top);
+          case 'parent': return winProxy(win.parent);
+          case 'document': return win === window ? pxDocument : Reflect.get(t, prop);
+        }
+        const v = Reflect.get(t, prop);
+        return typeof v === 'function' ? v.bind(win) : v;
+      },
+      set(t, prop, v) {
+        if (prop === 'location') {
+          makeLocation(win).href = v;
+          return true;
+        }
+        try {
+          Reflect.set(t, prop, v);
+        } catch {}
+        return true;
+      },
+    });
+    winCache.set(win, p);
+    return p;
+  }
+  const pxWindow = winProxy(window);
+
+  const pxDocument = new Proxy(document, {
+    get(t, prop) {
+      if (prop === 'location') return pxLocation;
+      if (prop === 'domain') return targetUrl().hostname;
+      if (prop === 'URL' || prop === 'documentURI') return targetUrl().href;
+      if (prop === 'referrer') return unproxy(t.referrer);
+      if (prop === 'defaultView') return pxWindow;
+      const v = Reflect.get(t, prop);
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+    set(t, prop, v) {
+      if (prop === 'location') {
+        pxLocation.href = v;
+        return true;
+      }
+      try {
+        t[prop] = v;
+      } catch {}
+      return true;
+    },
+  });
+
+  // with() が参照を横取りするためのスコープオブジェクト。
+  // has は横取りしたい名前にだけ true を返し、それ以外は本来のスコープへ通す。
+  const SHADOW = { location: () => pxLocation, document: () => pxDocument, window: () => pxWindow,
+    self: () => pxWindow, globalThis: () => pxWindow, top: () => winProxy(window.top),
+    parent: () => winProxy(window.parent), frames: () => window.frames };
+  window.__pxScope = new Proxy(Object.create(null), {
+    has: (t, p) => typeof p === 'string' && p in SHADOW,
+    get: (t, p) => (typeof p === 'string' && p in SHADOW ? SHADOW[p]() : undefined),
+    set(t, p, v) {
+      if (p === 'location') pxLocation.href = v;
+      else try { window[p] = v; } catch {}
+      return true;
+    },
+  });
+
+  window.__px = { rw, unproxy, targetUrl, location: pxLocation, window: pxWindow, document: pxDocument };
 })();

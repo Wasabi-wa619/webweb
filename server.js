@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pipeline, Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { PREFIX, PROXIED_RE, proxify, decodeTarget, unproxyUrl, rewriteHtml, rewriteCss } from './lib/rewrite.js';
+import { PREFIX, PROXIED_RE, proxify, decodeTarget, unproxyUrl, rewriteHtml, rewriteCss, wrapScript, shouldScopeScript } from './lib/rewrite.js';
 import { CookieJar } from './lib/cookies.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
@@ -117,7 +117,7 @@ function scriptJson(obj) {
   return JSON.stringify(obj).replace(/[<\u2028\u2029]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 }
 
-export function createProxyServer({ allowPrivate = false, storePath = null } = {}) {
+export function createProxyServer({ allowPrivate = false, storePath = null, scriptScope = true } = {}) {
   const jars = new Map(); // セッションID -> CookieJar
 
   // クッキーをディスクに保存し、再起動後もセッションを維持する
@@ -207,18 +207,25 @@ export function createProxyServer({ allowPrivate = false, storePath = null } = {
     const ct = up.headers.get('content-type') || '';
     const isHtml = /text\/html|application\/xhtml\+xml/i.test(ct);
     const isCss = /text\/css/i.test(ct);
+    const isJs = /\b(?:application|text)\/(?:x-)?(?:java|ecma)script\b/i.test(ct);
+    const len0 = Number(up.headers.get('content-length')) || 0;
+    // 大きすぎる JS は書き換えずにそのまま流す
+    const transformJs = isJs && scriptScope && len0 <= 4 * 1024 * 1024;
     const hasBody = method !== 'HEAD' && up.status !== 204 && up.status !== 304 && up.body;
 
-    if (hasBody && (isHtml || isCss)) {
+    if (hasBody && (isHtml || isCss || transformJs)) {
       const buf = Buffer.from(await up.arrayBuffer());
       let text = decodeText(buf, detectCharset(ct, buf, isHtml));
       if (isHtml) {
         outCookies.push(`${ORIGIN_COOKIE}=${encodeURIComponent(target.origin)}; Path=/; SameSite=Lax`);
         const cfg = { url: target.href, cookies: jar.getCookieHeader(target, { includeHttpOnly: false }) };
         const inject = `<script>window.__PX=${scriptJson(cfg)}</script><script src="/__px/client.js"></script>`;
-        text = rewriteHtml(text, target.href, { inject });
-      } else {
+        text = rewriteHtml(text, target.href, { inject, scriptScope });
+      } else if (isCss) {
         text = rewriteCss(text, (u) => proxify(u, target.href));
+      } else if (shouldScopeScript(text)) {
+        // 外部のクラシックスクリプト (モジュールでないもの) を包む
+        text = wrapScript(text);
       }
       const data = Buffer.from(text, 'utf-8');
       out['content-type'] = ct.split(';')[0].trim() + '; charset=utf-8';
@@ -365,7 +372,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const storePath = process.env.SESSION_STORE
     ? path.resolve(process.env.SESSION_STORE)
     : path.join(path.dirname(fileURLToPath(import.meta.url)), '.px-sessions.json');
-  const srv = createProxyServer({ allowPrivate: process.env.ALLOW_PRIVATE === '1', storePath });
+  const srv = createProxyServer({
+    allowPrivate: process.env.ALLOW_PRIVATE === '1',
+    storePath,
+    scriptScope: process.env.SCRIPT_SCOPE !== '0',
+  });
   srv.listen(port, host, () => {
     console.log(`Web proxy listening on http://localhost:${port}`);
   });

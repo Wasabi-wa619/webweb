@@ -33,14 +33,22 @@ npm test                         # テスト
 - `document.cookie` をサーバー側のクッキーと同期します
 - `localStorage` / `sessionStorage` は対象サイトのオリジンごとに名前空間を分け、サイト間で混ざらないようにします
 - `postMessage` と `MessageEvent.origin` のオリジンを補正します
+- `location` / `window.location` / `document.location` の**読み取り**も、対象サイトの値を返します (下記参照)
+
+### location の読み取り (SPA 対策)
+
+多くの SPA ルーターは `location.pathname` などを読んで画面を切り替えます。そのままだとプロキシ側のパス (`/p/https://...`) が見えてしまうため、サーバー側で対象の `<script>` を `with(window.__pxScope){ ... }` で包み、コード中の裸の `location` ・ `window.location` ・ `document.location` ・ `document.URL` ・ `document.domain` が**本来のサイトの値**を返すようにしています。
+
+- 対象はクラシックなスクリプト (インライン・外部の両方) です。`location` / `top` / `parent` を参照し、`import` / `export` を含まないものだけを包みます。関数宣言や `var` はこれまでどおりグローバルに残ります。
+- `SCRIPT_SCOPE=0` で無効化できます。
 
 ## 制限
 
 ブラウザだけで動くプロキシの構造上、どうしても残る制限です。
 
-- ページ内の JavaScript が `location.pathname` や `location.hostname` を**読み取る**と、プロキシ側の値 (`/p/https://...`) が返ります。ページ移動 (`location.href =`、`assign`、`replace`、`pushState` など) は書き換えますが、JavaScript のコード自体は書き換えないため、現在パスを読んで動く一部の SPA ルーターは正しく動かないことがあります
+- **ES モジュール (`type="module"`) 内の `location` 読み取り**は補正できません。モジュールは `with` で包めない (構文エラーになる) ため、モジュールだけで書かれた SPA ルーターは現在パスを誤認することがあります。ページ移動そのもの (`location.href =`、`assign` / `replace`、`pushState` など) はモジュールでも書き換わります
 - Service Worker は無効にしています (単一オリジンのプロキシでは、サイトごとにスコープを分けて安全に動かせないため)
-- 仕組み上どうしても動かないもの: Google ログインなどの OAuth、CAPTCHA、DRM 付きの動画 (プロキシ経由であることが検知されたり、別オリジンのポップアップが必要なため)
+- OAuth ログイン (別オリジンのポップアップやリダイレクトを伴うもの)、CAPTCHA、DRM 付きの動画は、プロキシ経由であることが検知される / 別オリジンが必要なため、動かないことがあります。これらを回避 (検知のすり抜けや保護の解除) する機能は入れていません
 
 ## セキュリティ
 
