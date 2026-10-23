@@ -1,0 +1,15 @@
+{
+  "name": "webweb",
+  "version": "1.0.0",
+  "description": "JavaScript対応のWebプロキシ (依存パッケージなし)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

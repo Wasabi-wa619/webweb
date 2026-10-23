@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webweb</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1d2330; --muted: #6b7280; --card: #fff; --border: #d9dde4; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --fg: #e6e8ec; --muted: #9aa1ad; --card: #171a21; --border: #2a2f3a; --accent: #60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  main { width: 100%; max-width: 640px; }
+  h1 { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  p { color: var(--muted); margin: 0 0 24px; }
+  form { display: flex; gap: 8px; }
+  input {
+    flex: 1; min-width: 0; font: inherit; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg); outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  button {
+    font: inherit; padding: 12px 18px; border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--accent); color: #fff; font-weight: 600;
+  }
+  .links { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .links a {
+    font-size: 0.9rem; color: var(--fg); text-decoration: none; padding: 6px 12px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>webweb</h1>
+  <p>JavaScript対応のWebプロキシ。URLか検索ワードを入力してください。</p>
+  <form id="f">
+    <input id="q" type="text" autocomplete="off" autofocus placeholder="https://example.com または検索ワード">
+    <button type="submit">開く</button>
+  </form>
+  <div class="links">
+    <a href="/p/https://ja.wikipedia.org/">Wikipedia</a>
+    <a href="/p/https://html.duckduckgo.com/html/">DuckDuckGo</a>
+    <a href="/p/https://news.ycombinator.com/">Hacker News</a>
+  </div>
+</main>
+<script>
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = document.getElementById('q').value.trim();
+    if (!q) return;
+    let url;
+    if (/^https?:\/\//i.test(q)) url = q;
+    else if (/^[^\s]+\.[^\s]{2,}$/.test(q)) url = 'https://' + q;
+    else url = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q);
+    location.href = '/p/' + url;
+  });
+</script>
+</body>
+</html>
