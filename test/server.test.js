@@ -2,6 +2,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createProxyServer } from '../server.js';
 
 let upstream, proxy, UP, PX;
@@ -24,6 +27,10 @@ before(async () => {
     if (req.url === '/redirect') {
       res.writeHead(302, { location: '/page' });
       return res.end();
+    }
+    if (req.url === '/persist') {
+      res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'pref=keep; Path=/; Max-Age=3600' });
+      return res.end('<title>p</title>');
     }
     if (req.url === '/echo') {
       let body = '';
@@ -134,4 +141,28 @@ test('WebSocket is tunnelled with the real origin', async () => {
   });
   ws.close();
   assert.equal(msg, 'echo:ping|origin:https://site.test|cookie:');
+});
+
+test('cookie jar persists to disk across restarts', async () => {
+  const store = path.join(os.tmpdir(), `px-store-${crypto.randomUUID()}.json`);
+  const s1 = createProxyServer({ allowPrivate: true, storePath: store });
+  await new Promise((r) => s1.listen(0, '127.0.0.1', r));
+  track(s1);
+  const P1 = `http://127.0.0.1:${s1.address().port}`;
+  const first = await fetch(`${P1}/p/${UP}/persist`);
+  const sid = first.headers.getSetCookie().find((c) => c.startsWith('__px_sid=')).split(';')[0];
+  // give the debounced write time to flush, then stop the server
+  await new Promise((r) => setTimeout(r, 1200));
+  await new Promise((r) => s1.close(r));
+  assert.ok(fs.existsSync(store), 'store file written');
+
+  // a fresh server loads the same jar; the persisted cookie is replayed upstream
+  const s2 = createProxyServer({ allowPrivate: true, storePath: store });
+  await new Promise((r) => s2.listen(0, '127.0.0.1', r));
+  track(s2);
+  const P2 = `http://127.0.0.1:${s2.address().port}`;
+  const echo = await (await fetch(`${P2}/p/${UP}/echo`, { headers: { cookie: sid } })).json();
+  assert.match(echo.cookie, /pref=keep/);
+  await new Promise((r) => s2.close(r));
+  fs.rmSync(store, { force: true });
 });

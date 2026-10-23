@@ -161,6 +161,57 @@
     } catch {}
   }
 
+  // ---- ストレージの分離 ----
+  // すべてのサイトがプロキシと同じオリジンで動くため、localStorage / sessionStorage を
+  // 対象サイトのオリジンごとに名前空間を分け、サイト間で混ざらないようにする。
+  function isolateStorage(native, ns) {
+    const pfx = '\u0000px\u0000' + ns + '\u0000';
+    const keys = () => {
+      const out = [];
+      for (let i = 0; i < native.length; i++) {
+        const k = native.key(i);
+        if (k && k.startsWith(pfx)) out.push(k.slice(pfx.length));
+      }
+      return out;
+    };
+    const api = {
+      getItem: (k) => native.getItem(pfx + k),
+      setItem: (k, v) => native.setItem(pfx + k, String(v)),
+      removeItem: (k) => native.removeItem(pfx + k),
+      key: (i) => keys()[i] ?? null,
+      clear: () => keys().forEach((k) => native.removeItem(pfx + k)),
+      get length() {
+        return keys().length;
+      },
+    };
+    const reserved = (p) => p in api || typeof p === 'symbol';
+    return new Proxy(api, {
+      get: (t, p) => (reserved(p) ? (typeof t[p] === 'function' ? t[p].bind(t) : t[p]) : native.getItem(pfx + p) ?? undefined),
+      set: (t, p, v) => (reserved(p) || native.setItem(pfx + p, String(v)), true),
+      has: (t, p) => reserved(p) || native.getItem(pfx + p) !== null,
+      deleteProperty: (t, p) => (reserved(p) || native.removeItem(pfx + p), true),
+      ownKeys: () => keys(),
+      getOwnPropertyDescriptor: (t, p) => {
+        const v = typeof p === 'string' ? native.getItem(pfx + p) : null;
+        return v === null ? undefined : { value: v, writable: true, enumerable: true, configurable: true };
+      },
+    });
+  }
+  try {
+    const ns = targetUrl().origin || 'null';
+    for (const name of ['localStorage', 'sessionStorage']) {
+      let native;
+      try {
+        native = window[name];
+      } catch {
+        continue;
+      }
+      if (!native) continue;
+      const iso = isolateStorage(native, ns);
+      Object.defineProperty(window, name, { configurable: true, get: () => iso });
+    }
+  } catch {}
+
   // ---- ナビゲーション ----
 
   const _open = window.open;
@@ -175,7 +226,18 @@
     };
   }
 
-  // location.href = "..." などはフックできないため Navigation API で横取りする (Chromium系)
+  // location.assign / replace は Location.prototype 上にあり差し替えられる
+  for (const m of ['assign', 'replace']) {
+    const orig = Location.prototype[m];
+    if (!orig) continue;
+    try {
+      Location.prototype[m] = function (url) {
+        return orig.call(this, rw(url));
+      };
+    } catch {}
+  }
+
+  // location.href = "..." はフックできないため Navigation API で横取りする (Chromium系)
   if (window.navigation && typeof navigation.addEventListener === 'function') {
     navigation.addEventListener('navigate', (e) => {
       try {

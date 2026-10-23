@@ -117,8 +117,34 @@ function scriptJson(obj) {
   return JSON.stringify(obj).replace(/[<\u2028\u2029]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 }
 
-export function createProxyServer({ allowPrivate = false } = {}) {
+export function createProxyServer({ allowPrivate = false, storePath = null } = {}) {
   const jars = new Map(); // セッションID -> CookieJar
+
+  // クッキーをディスクに保存し、再起動後もセッションを維持する
+  if (storePath) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+      for (const [sid, cookies] of Object.entries(saved)) jars.set(sid, new CookieJar(cookies));
+    } catch {}
+  }
+  let saveTimer = null;
+  function persist() {
+    if (!storePath || saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      const out = {};
+      for (const [sid, jar] of jars) {
+        const c = jar.toJSON();
+        if (c.length) out[sid] = c;
+      }
+      const tmp = storePath + '.' + process.pid + '.tmp';
+      fs.writeFile(tmp, JSON.stringify(out), (err) => {
+        if (err) return;
+        fs.rename(tmp, storePath, () => {});
+      });
+    }, 1000);
+    if (saveTimer.unref) saveTimer.unref();
+  }
 
   function session(req, res, outCookies) {
     const cookies = parseCookies(req.headers.cookie);
@@ -165,7 +191,9 @@ export function createProxyServer({ allowPrivate = false } = {}) {
       return errorPage(res, 502, '接続に失敗しました', `${target.href}: ${err.cause?.message || err.message}`);
     }
 
-    for (const sc of up.headers.getSetCookie()) jar.setCookie(sc, target);
+    const setCookies = up.headers.getSetCookie();
+    for (const sc of setCookies) jar.setCookie(sc, target);
+    if (setCookies.length) persist();
 
     const out = {};
     for (const [k, v] of up.headers) {
@@ -226,7 +254,10 @@ export function createProxyServer({ allowPrivate = false } = {}) {
       try {
         const { url: pageUrl, cookie } = JSON.parse((await readBody(req)).toString('utf-8'));
         const u = new URL(pageUrl);
-        if (u.protocol === 'http:' || u.protocol === 'https:') jar.setCookie(cookie, u, { fromScript: true });
+        if (u.protocol === 'http:' || u.protocol === 'https:') {
+          jar.setCookie(cookie, u, { fromScript: true });
+          persist();
+        }
       } catch {}
       res.writeHead(204, outCookies.length ? { 'set-cookie': outCookies } : {});
       return res.end();
@@ -309,13 +340,40 @@ export function createProxyServer({ allowPrivate = false } = {}) {
   server.on('upgrade', (req, socket, head) => {
     upgrade(req, socket, head).catch(() => socket.destroy());
   });
+  // 終了時に同期で書き出す
+  server.flushStore = () => {
+    if (!storePath) return;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const out = {};
+    for (const [sid, jar] of jars) {
+      const c = jar.toJSON();
+      if (c.length) out[sid] = c;
+    }
+    try {
+      fs.writeFileSync(storePath, JSON.stringify(out));
+    } catch {}
+  };
   return server;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT) || 8080;
   const host = process.env.HOST || '0.0.0.0';
-  createProxyServer({ allowPrivate: process.env.ALLOW_PRIVATE === '1' }).listen(port, host, () => {
+  const storePath = process.env.SESSION_STORE
+    ? path.resolve(process.env.SESSION_STORE)
+    : path.join(path.dirname(fileURLToPath(import.meta.url)), '.px-sessions.json');
+  const srv = createProxyServer({ allowPrivate: process.env.ALLOW_PRIVATE === '1', storePath });
+  srv.listen(port, host, () => {
     console.log(`Web proxy listening on http://localhost:${port}`);
   });
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      srv.flushStore();
+      srv.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 2000).unref();
+    });
+  }
 }
