@@ -118,6 +118,14 @@ main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 
 .msg .body code { font-family: var(--font-mono); font-size: 0.9em; }
 .msg .body :not(pre) > code { background: var(--side); padding: 1px 5px; border-radius: 4px; }
 .msg .meta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.sources { display: grid; gap: 4px; font-size: 13px; border-left: 2px solid var(--line); padding-left: 10px; margin-top: 4px; }
+.sources b { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0.04em; }
+.sources a { color: var(--accent); text-decoration: none; }
+.sources a:hover { text-decoration: underline; }
+.sources span { color: var(--muted); font-size: 12px; }
+.news-note { font-size: 13px; color: var(--muted); }
+dialog .check { display: flex; gap: 8px; align-items: center; color: var(--ink); font-size: 14px; }
+dialog .check input { width: auto; }
 .cursor::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .cursor::after { animation: none; } }
@@ -240,9 +248,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
     <label>キャラクター・口調の指示 (システムプロンプト)
       <textarea id="set-system"></textarea>
     </label>
+    <label class="check" id="set-news-row" hidden><input id="set-news" type="checkbox"> 毎日集めている記事を探して、それをもとに答える</label>
     <div class="grid2">
       <label>温度 (0 で毎回同じ答え)<input id="set-temp" type="number" min="0" max="2" step="0.1"></label>
-      <label>答えの最大の長さ (トークン)<input id="set-max" type="number" min="16" max="4096" step="16"></label>
+      <label>答えの最大の長さ (トークン)<input id="set-max" type="number" min="16" max="4096" step="1"></label>
     </div>
     <div class="actions">
       <button class="btn ghost" type="button" id="set-reset">初期設定に戻す</button>
@@ -263,6 +272,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
     temperature: 0.7,
     maxTokens: 512,
     remoteHost: CFG.remoteHost || '',
+    useNews: true,
   };
   const EXAMPLES = ['自己紹介してください', '日本の四季について短く説明して', '朝ごはんの献立を3つ考えて', 'Python でリストを逆順にする方法は?'];
   const HISTORY_TURNS = 6; // 直近の何往復をモデルに見せるか (長すぎると遅く、メモリも足りなくなる)
@@ -278,6 +288,65 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
   let convs = store.get('chat.conversations', []);
   let current = null;           // 表示中の会話
   const st = { loaded: false, loading: false, busy: false, device: '' };
+
+  // ---------- 集めたニュースを探す (毎日の自動学習がある場合) ----------
+  // 日本語は単語の区切りが無いので、2 文字ずつの組 (bigram) で BM25 の点数をつける
+  const news = { articles: [], docs: [], df: new Map(), avgdl: 1, updated: null };
+  const bigrams = text => {
+    const t = text.normalize('NFKC').toLowerCase().replace(/[\s、。,.!?！？「」『』()（）・:：;；"'\-—…]+/g, ' ');
+    const out = [];
+    for (let i = 0; i < t.length - 1; i++) if (t[i] !== ' ' && t[i + 1] !== ' ') out.push(t.slice(i, i + 2));
+    return out;
+  };
+  async function loadNews() {
+    try {
+      const [ra, rs] = await Promise.all([fetch('../auto/articles.json', { cache: 'no-cache' }), fetch('../auto/status.json', { cache: 'no-cache' })]);
+      if (!ra.ok) return;
+      news.articles = await ra.json();
+      if (rs.ok) news.updated = (await rs.json()).updated;
+    } catch (e) { return; }
+    let total = 0;
+    news.docs = news.articles.map(a => {
+      const tf = new Map();
+      const toks = bigrams(a.t + ' ' + a.t + ' ' + a.s); // 見出しは重く見る
+      for (const b of toks) tf.set(b, (tf.get(b) || 0) + 1);
+      for (const b of tf.keys()) news.df.set(b, (news.df.get(b) || 0) + 1);
+      total += toks.length;
+      return { tf, len: toks.length };
+    });
+    news.avgdl = total / Math.max(1, news.docs.length);
+    render();
+  }
+  function searchNews(query, k = 3) {
+    if (!news.articles.length || !settings.useNews) return [];
+    const q = [...new Set(bigrams(query))];
+    const N = news.docs.length;
+    const scored = [];
+    news.docs.forEach((d, i) => {
+      let s = 0, hits = 0;
+      for (const b of q) {
+        const tf = d.tf.get(b);
+        if (!tf) continue;
+        hits++;
+        const df = news.df.get(b);
+        const idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
+        s += idf * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * d.len / news.avgdl));
+      }
+      if (hits >= 2) scored.push([s, i]);
+    });
+    scored.sort((a, b) => b[0] - a[0]);
+    const best = scored.length ? scored[0][0] : 0;
+    let hits = scored.filter(([s]) => s >= Math.max(3, best * 0.5)).slice(0, k).map(([, i]) => news.articles[i]);
+    // 「最近のニュースは?」のように、話題を決めずに聞かれたら新しい記事を見せる
+    if (!hits.length && /ニュース|最近|さいきん|今日|きょう|最新|新着|話題|できごと|出来事/.test(query)) hits = news.articles.slice(0, k);
+    return hits;
+  }
+  function newsContext(refs) {
+    const fmt = d => d ? new Date(d).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+    return '\n\n以下は、このサイトが毎日集めている記事のうち、質問に関係がありそうなものです。' +
+      '質問に関係があれば、記事の内容をもとに答えてください。記事に書かれていないことは、推測せず「記事には書かれていません」と言ってください。\n\n' +
+      refs.map((a, i) => `[${i + 1}] ${a.t} (${fmt(a.d)}・${a.src})\n${a.s}`).join('\n\n');
+  }
 
   // ---------- モデルとのやりとり ----------
   let worker = null;
@@ -395,6 +464,13 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
     w.className = 'welcome';
     w.innerHTML = `<h1>何でも聞いてください</h1>
       <p>このチャットのモデルは、あなたの端末の中で動いています。最初に一度だけモデルをダウンロードします。</p>`;
+    if (news.articles.length && settings.useNews) {
+      const n = document.createElement('p');
+      n.className = 'news-note';
+      const when = news.updated ? new Date(news.updated).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      n.textContent = `毎日集めている記事 ${news.articles.length.toLocaleString()} 件から、質問に関係するものを探して答えます${when ? ` (${when} 更新)` : ''}。`;
+      w.append(n);
+    }
     if (!st.loaded) {
       const card = document.createElement('div');
       card.className = 'load-card';
@@ -413,7 +489,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
     }
     const ex = document.createElement('div');
     ex.className = 'examples';
-    for (const t of EXAMPLES) {
+    const examples = news.articles.length && settings.useNews
+      ? ['最近のニュースを教えて', `「${news.articles[0].t.slice(0, 24)}」について教えて`, ...EXAMPLES.slice(0, 2)]
+      : EXAMPLES;
+    for (const t of examples) {
       const b = document.createElement('button');
       b.className = 'example'; b.type = 'button'; b.textContent = t;
       b.onclick = () => send(t);
@@ -431,6 +510,21 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
     if (m.role === 'user') body.textContent = m.content;
     else body.innerHTML = md(m.content);
     el.append(body);
+    if (m.sources && m.sources.length) {
+      const src = document.createElement('div');
+      src.className = 'sources';
+      src.innerHTML = '<b>参考にした記事</b>';
+      for (const a of m.sources) {
+        const row = document.createElement('div');
+        const link = document.createElement('a');
+        link.href = a.u; link.target = '_blank'; link.rel = 'noopener'; link.textContent = a.t;
+        const from = document.createElement('span');
+        from.textContent = ' ' + a.src;
+        row.append(link, from);
+        src.append(row);
+      }
+      el.append(src);
+    }
     if (m.meta) {
       const meta = document.createElement('div');
       meta.className = 'meta';
@@ -483,8 +577,9 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
       return;
     }
     const history = conv.messages.slice(-(HISTORY_TURNS * 2 - 1));
-    const messages = [{ role: 'system', content: settings.system }, ...history];
-    const answer = { role: 'assistant', content: '' };
+    const refs = searchNews(text);
+    const messages = [{ role: 'system', content: settings.system + (refs.length ? newsContext(refs) : '') }, ...history];
+    const answer = { role: 'assistant', content: '', sources: refs.map(a => ({ t: a.t, u: a.u, src: a.src })) };
     conv.messages.push(answer);
     render();
     const nodes = $('thread').lastElementChild.querySelector('.body');
@@ -545,6 +640,8 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
   function fillSettings(s) {
     $('set-model').value = s.model; $('set-system').value = s.system;
     $('set-temp').value = s.temperature; $('set-max').value = s.maxTokens;
+    $('set-news').checked = s.useNews !== false;
+    $('set-news-row').hidden = !news.articles.length;
   }
   $('btn-settings').onclick = () => { fillSettings(settings); $('settings').showModal(); };
   $('set-reset').onclick = () => fillSettings(DEFAULTS);
@@ -555,6 +652,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
       system: $('set-system').value.trim() || DEFAULTS.system,
       temperature: Math.max(0, Number($('set-temp').value) || 0),
       maxTokens: Math.max(16, Number($('set-max').value) || DEFAULTS.maxTokens),
+      useNews: $('set-news').checked,
     });
     const modelChanged = next.model !== settings.model;
     settings = next;
@@ -564,7 +662,8 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap:
   });
 
   render();
-  window.__chat = { st, get settings() { return settings; }, get convs() { return convs; } }; // 動作確認用
+  loadNews();
+  window.__chat = { st, news, searchNews, get settings() { return settings; }, get convs() { return convs; } }; // 動作確認用
 })();
 </script>
 </body>

@@ -142,10 +142,32 @@ def load_json(path):
 
 
 # ---------- 学習 ----------
+def extend_vocab(model, tok, text):
+    """学習済みのモデルに、まだ知らない文字を語彙として足す (既存の文字の番号は変えない)。"""
+    new = sorted(set(text) - set(tok.chars), key=lambda c: c.encode("utf-16-be"))
+    if not new:
+        return model, tok, 0
+    n = len(new)
+    with torch.no_grad():
+        wte, head = model.p("wte"), model.p("head_w")
+        model.params["wte"] = nn.Parameter(torch.cat([wte, torch.randn(n, wte.shape[1], device=wte.device) * 0.02]))
+        model.params["head_w"] = nn.Parameter(torch.cat([head, torch.randn(head.shape[0], n, device=head.device) * 0.02], dim=1))
+    model.cfg["vocabSize"] += n
+    return model, CharTokenizer(tok.chars + new), n
+
+
 def train(text, n_layer=6, n_head=8, n_embd=256, block_size=256, batch_size=64,
-          steps=3000, lr=1e-3, eval_every=250, device=None, out="tiny_gpt.json", log=print):
+          steps=3000, lr=1e-3, eval_every=250, device=None, out="tiny_gpt.json", log=print,
+          model=None, tok=None, max_seconds=None):
+    """model と tok を渡すと、そのモデルの続きから学習する (毎日の追加学習用)。
+    max_seconds を決めると、その時間で打ち切る。結果の損失は model.stats に入る。"""
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    tok = CharTokenizer.from_text(text)
+    added = 0
+    if model is not None:
+        model, tok, added = extend_vocab(model, tok, text)
+        block_size = model.cfg["blockSize"]
+    else:
+        tok = CharTokenizer.from_text(text)
     data = torch.tensor(tok.encode(text), dtype=torch.long)
     # 「質問:」「答え:」の形の文章は、どの組も覚えてほしいので検証用に取り分けない
     is_qa = "質問:" in text and "答え:" in text
@@ -155,9 +177,13 @@ def train(text, n_layer=6, n_head=8, n_embd=256, block_size=256, batch_size=64,
         val_data = train_data
     block_size = min(block_size, len(train_data) - 1)
 
-    cfg = dict(vocabSize=len(tok.chars), nLayer=n_layer, nHead=n_head, nEmbd=n_embd, blockSize=block_size)
-    model = GPT(cfg).to(device)
-    log(f"文字数 {len(data):,} / 語彙 {len(tok.chars):,} / パラメータ {sum(p.numel() for p in model.parameters()):,} / {device}")
+    if model is None:
+        cfg = dict(vocabSize=len(tok.chars), nLayer=n_layer, nHead=n_head, nEmbd=n_embd, blockSize=block_size)
+        model = GPT(cfg)
+    model = model.to(device)
+    model.train()
+    log(f"文字数 {len(data):,} / 語彙 {len(tok.chars):,} (新しい文字 {added}) / "
+        f"パラメータ {sum(p.numel() for p in model.parameters()):,} / {device}")
 
     def get_batch(split):
         d = train_data if split == "train" else val_data
@@ -178,13 +204,19 @@ def train(text, n_layer=6, n_head=8, n_embd=256, block_size=256, batch_size=64,
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     warmup = max(1, steps // 20)
     t0 = time.time()
+    first = last = None
     for step in range(steps + 1):
+        if max_seconds and step < steps and time.time() - t0 > max_seconds:
+            log(f"{max_seconds:.0f} 秒たったので step {step} で打ち切ります")
+            steps = step
         # 最初は徐々に上げ、あとはコサインで下げる
         scale = step / warmup if step < warmup else 0.5 * (1 + math.cos(math.pi * (step - warmup) / max(1, steps - warmup)))
         for g in opt.param_groups:
             g["lr"] = lr * max(scale, 0.1)
         if step % eval_every == 0 or step == steps:
             l = estimate()
+            first = first or l
+            last = l
             log(f"step {step:5d}  train {l['train']:.3f}  val {l['val']:.3f}  ({time.time() - t0:.0f}s)")
         if step == steps:
             break
@@ -195,6 +227,8 @@ def train(text, n_layer=6, n_head=8, n_embd=256, block_size=256, batch_size=64,
         opt.step()
 
     model.eval()
+    model.stats = {"steps": steps, "seconds": round(time.time() - t0), "newChars": added,
+                   "lossBefore": round(first["train"], 4), "loss": round(last["train"], 4), "val": round(last["val"], 4)}
     if out:
         save_json(model, tok, out)
         log(f"{out} に保存しました")

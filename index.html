@@ -35,6 +35,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -113,6 +114,8 @@ input[type="number"] { font-family: var(--font-mono); font-size: 14px; }
   border-radius: 6px; padding: 8px 16px;
 }
 .btn.ghost { background: transparent; color: var(--accent); }
+a.btn { text-decoration: none; }
+#auto-history th { font-weight: 500; color: var(--muted); padding: 2px 10px 2px 0; }
 .btn.warn { background: transparent; color: var(--danger); border-color: var(--line); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .file-btn { position: relative; overflow: hidden; display: inline-block; }
@@ -177,6 +180,30 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     <li><b><span class="n">3</span>次の文字を予想</b>次に来る文字の確率を、語彙のすべてについて出します。</li>
     <li><b><span class="n">4</span>外れた分だけ直す</b>本当の次の文字との差 (損失) が小さくなるよう、重みを少しずつ動かします。</li>
   </ol>
+
+  <section class="panel auto" id="auto" aria-labelledby="h-auto" hidden>
+    <h2 id="h-auto">毎日の自動学習 <span class="status-pill" id="auto-when"></span></h2>
+    <p class="note">毎日決まった時刻に、ニュースのフィードから新しい記事 (見出しと要約) を集め、このモデルを前日の続きから学習させています。</p>
+    <div class="stats">
+      <div class="stat"><span>集めた記事</span><b id="auto-articles">–</b></div>
+      <div class="stat"><span>きょう増えた記事</span><b id="auto-new">–</b></div>
+      <div class="stat"><span>学習の損失</span><b id="auto-loss">–</b></div>
+      <div class="stat"><span>累計ステップ</span><b id="auto-steps">–</b></div>
+    </div>
+    <div>
+      <p class="note" style="margin-bottom:6px">きょうの試し書き</p>
+      <pre class="output peek" id="auto-sample"></pre>
+    </div>
+    <div class="row">
+      <button class="btn" id="btn-auto-load" type="button">このモデルを開く</button>
+      <a class="btn ghost" href="chat/" id="auto-chat">集めたニュースについてチャットで質問する</a>
+    </div>
+    <details>
+      <summary>フィードの状態と、これまでの記録</summary>
+      <ul class="note" id="auto-feeds" style="margin:8px 0 0;padding-left:1.2em"></ul>
+      <div style="overflow-x:auto;margin-top:8px"><table class="meta" id="auto-history"></table></div>
+    </details>
+  </section>
 
   <div class="grid">
     <div class="col">
@@ -951,6 +978,58 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     const b = tf.getBackend();
     $('backend').textContent = `計算エンジン: ${b === 'webgl' ? 'GPU (WebGL)' : b === 'webgpu' ? 'GPU (WebGPU)' : 'CPU'} / TensorFlow.js ${tf.version.tfjs}`;
   });
+  // ---------- 毎日の自動学習の結果 (GitHub Pages で公開しているときだけ出る) ----------
+  async function showAuto() {
+    let s;
+    try {
+      const r = await fetch('auto/status.json', { cache: 'no-cache' });
+      if (!r.ok) return;
+      s = await r.json();
+    } catch (e) { return; }
+    const last = s.last || {};
+    const t = last.train;
+    const when = new Date(s.updated);
+    $('auto-when').textContent = when.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' 更新';
+    $('auto-articles').textContent = (last.articles || 0).toLocaleString();
+    $('auto-new').textContent = '+' + (last.newArticles || 0).toLocaleString();
+    $('auto-loss').textContent = t ? `${t.lossBefore} → ${t.loss}` : '–';
+    $('auto-steps').textContent = (s.totalSteps || 0).toLocaleString();
+    $('auto-sample').textContent = t ? t.sample : '学習に使える文章がまだ少ないので、たまるのを待っています (2000 字から始めます)。';
+    $('btn-auto-load').hidden = !t;
+    const ul = $('auto-feeds');
+    ul.textContent = '';
+    for (const f of last.feeds || []) {
+      const li = document.createElement('li');
+      li.textContent = f.ok ? `${f.title || f.url}: ${f.items} 件 (新しい記事 ${f.new})` : `${f.url}: 読めませんでした (${f.error})`;
+      if (!f.ok) li.style.color = 'var(--danger)';
+      ul.append(li);
+    }
+    const tb = $('auto-history');
+    tb.innerHTML = '<tr><th align="left">日付</th><th align="right">記事</th><th align="right">増えた</th><th align="right">ステップ</th><th align="right">損失</th><th align="right">語彙</th></tr>';
+    for (const h of (s.history || []).slice().reverse().slice(0, 30)) {
+      const tr = document.createElement('tr');
+      const d = new Date(h.date).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      const cells = [d, h.articles, '+' + h.newArticles, h.train ? h.train.steps : '–', h.train ? h.train.loss : '–', h.train ? h.train.vocab : '–'];
+      tr.innerHTML = cells.map((c, i) => `<td align="${i ? 'right' : 'left'}" style="padding:2px 10px 2px 0">${c}</td>`).join('');
+      tb.append(tr);
+    }
+    $('auto').hidden = false;
+    $('btn-auto-load').onclick = async () => {
+      $('btn-auto-load').disabled = true;
+      try {
+        const r = await fetch('auto/tiny_gpt.json', { cache: 'no-cache' });
+        const { model, tokenizer } = deserialize(await r.json());
+        adoptLoaded(model, tokenizer, '毎日の自動学習のモデル');
+        setMode('continue');
+        $('prompt').value = '';
+        $('h-gen').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (e) {
+        note('毎日の自動学習のモデルを開けませんでした: ' + e.message, true);
+      }
+      $('btn-auto-load').disabled = false;
+    };
+  }
+  showAuto();
   window.__tinyGptApp = st; // 動作確認用
 })();
 </script>

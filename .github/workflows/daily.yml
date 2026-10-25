@@ -1,0 +1,47 @@
+# 毎日 RSS から記事を集めて、ちいさなGPTを続きから学習させ、GitHub Pages に公開する。
+# 最初に一度だけ: リポジトリの Settings → Pages → Source を「GitHub Actions」にする。
+# スケジュール実行は、リポジトリのデフォルトブランチにあるこのファイルだけが動く。
+name: 毎日の自動学習
+
+on:
+  schedule:
+    - cron: "17 19 * * *"   # 毎日 4:17 (日本時間)
+  workflow_dispatch:         # Actions のページの「Run workflow」で、すぐにも動かせる
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: PyTorch (CPU 版) を入れる
+        run: pip install torch numpy --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+      - id: pages
+        uses: actions/configure-pages@v5
+      - name: 記事を集めて学習する
+        run: python auto/daily.py --site "${{ steps.pages.outputs.base_url }}" --out _site --minutes 25
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: train
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
