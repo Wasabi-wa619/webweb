@@ -136,6 +136,10 @@ canvas#chart { width: 100%; height: 220px; display: block; }
   padding: 12px 14px; min-height: 120px; margin: 0;
 }
 .output .prompt { color: var(--muted); }
+.chat { display: grid; gap: 10px; }
+.chat .q { color: var(--muted); }
+.chat .a { color: var(--ink); }
+.chat .turn { display: grid; gap: 2px; }
 .output.peek { min-height: 0; font-size: 14px; }
 .note { font-size: 13px; color: var(--muted); margin: 0; }
 .note.err { color: var(--danger); }
@@ -177,14 +181,16 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
   <div class="grid">
     <div class="col">
       <section class="panel" aria-labelledby="h-data">
-        <h2 id="h-data">学習データ <small>例として短いお話を入れてあります</small></h2>
+        <h2 id="h-data">学習データ</h2>
         <textarea id="text" spellcheck="false" aria-label="学習に使う文章"></textarea>
         <div class="row">
           <span class="file-btn btn ghost" role="button">テキストファイルを開く<input id="file-text" type="file" accept=".txt,text/plain" aria-label="テキストファイルを開く"></span>
-          <button class="btn ghost" id="btn-sample" type="button">例に戻す</button>
+          <button class="btn ghost" id="btn-sample" type="button">例: お話</button>
+          <button class="btn ghost" id="btn-sample-qa" type="button">例: 質問と答え</button>
         </div>
         <p class="meta" id="data-meta"></p>
         <p class="note">文章は多いほど上手になります。数千字なら言い回しのまね、数十万字あると文らしくなってきます。</p>
+        <p class="note">質問に答えさせたいときは、「質問: …」「答え: …」の 2 行を空行で区切って並べます (「例: 質問と答え」を参照)。教えた質問や、言い方を少し変えた質問に答えるようになります。</p>
       </section>
 
       <section class="panel" aria-labelledby="h-model">
@@ -193,6 +199,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
           <button class="chip" type="button" data-preset="mini">ミニ (数分)</button>
           <button class="chip" type="button" data-preset="small">小 (十数分)</button>
           <button class="chip" type="button" data-preset="medium">中 (GPU 向け)</button>
+          <button class="chip" type="button" data-preset="qa">会話向け</button>
         </div>
         <div class="fields">
           <label>層の数<input id="nLayer" type="number" min="1" max="12"></label>
@@ -224,6 +231,10 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li>最後のセルで <code>tiny_gpt.json</code> がダウンロードされます。この画面の「JSON を読み込む」で開くと、ここで文章を生成できます。</li>
           </ol>
         </details>
+        <details>
+          <summary>ChatGPT のように何でも答えさせたいとき</summary>
+          <p class="note" style="margin-top:8px">ここで一から作るモデルが答えられるのは、教えた質問とその言い換えまでです。教えていない質問にも答えさせるには、大量の文章で事前学習したモデルが必要です。<code>colab/chat_finetune.ipynb</code> は、日本語を話せる公開モデル (Qwen2.5) に、同じ「質問: … / 答え: …」の形のデータを LoRA で追加学習させ、自分の知識と口調を足します。Colab の T4 GPU で数分から十数分で終わり、チャット画面の URL も出ます。</p>
+        </details>
       </section>
     </div>
 
@@ -247,7 +258,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
         </div>
         <div class="legend">
           <span><i style="background: var(--accent)"></i>学習の損失</span>
-          <span><i style="background: var(--val)"></i>検証の損失 (学習に使っていない 1 割)</span>
+          <span><i style="background: var(--val)"></i><span id="val-label">検証の損失 (学習に使っていない 1 割)</span></span>
           <span><i style="background: var(--line)"></i>でたらめに選んだ場合 = ln(語彙数)</span>
         </div>
         <p class="note">損失はクロスエントロピー (単位: nat)。下がるほど、次の文字をうまく当てています。検証の損失だけが上がり始めたら、丸暗記 (過学習) のサインです。</p>
@@ -259,10 +270,14 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       </section>
 
       <section class="panel" aria-labelledby="h-gen">
-        <h2 id="h-gen">文章を書かせる</h2>
+        <h2 id="h-gen">使ってみる</h2>
+        <div class="presets" role="group" aria-label="使い方">
+          <button class="chip" type="button" data-mode="continue" aria-pressed="true">続きを書く</button>
+          <button class="chip" type="button" data-mode="qa" aria-pressed="false">質問に答える</button>
+        </div>
         <label class="fields" style="grid-template-columns:1fr">
-          <span style="font-size:12.5px;color:var(--muted)">書き出し</span>
-          <input id="prompt" type="text" value="ある日、" aria-label="書き出し">
+          <span style="font-size:12.5px;color:var(--muted)" id="prompt-label">書き出し</span>
+          <input id="prompt" type="text" value="ある日、">
         </label>
         <div class="fields">
           <label>長さ (字)<input id="genLen" type="number" min="1" max="2000" value="200"></label>
@@ -271,9 +286,12 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
         </div>
         <div class="row">
           <button class="btn" id="btn-gen" type="button" disabled>書かせる</button>
+          <button class="btn ghost" id="btn-clear" type="button" hidden>会話を消す</button>
           <button class="btn ghost" id="btn-stop" type="button" disabled>止める</button>
         </div>
         <pre class="output" id="output">モデルを学習させるか読み込むと、書き出しの続きを書きます。</pre>
+        <div class="output chat" id="chat" hidden></div>
+        <p class="note" id="qa-note" hidden>「質問: (入力)」「答え: 」のあとを書かせ、改行が出たところで止めます。学習データに無い文字は読めないので外します。</p>
         <p class="note">温度を下げると無難に、上げると冒険的になります。「上位 k 個から」は確率の高い k 文字だけから選びます (0 は制限なし)。</p>
       </section>
     </div>
@@ -325,6 +343,121 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 配達係のきつねは、かばんに手紙をつめて、坂道をのぼっていきました。
 </script>
 
+<script type="text/plain" id="sample-qa">質問: あなたはだれですか。
+答え: わたしは、山の郵便局のお話を読んで育った、小さな言語モデルです。
+
+質問: あなたの名前は。
+答え: 名前はまだありません。ちいさなGPTと呼んでください。
+
+質問: 名前を教えて。
+答え: 名前はまだありません。ちいさなGPTと呼んでください。
+
+質問: 何ができますか。
+答え: 郵便局のお話について、知っていることを答えられます。
+
+質問: 何を知っていますか。
+答え: 山の郵便局と、そこにいる動物たちのことを知っています。
+
+質問: 郵便局はどこにありますか。
+答え: 山のふもとにあります。
+
+質問: 郵便局はどこ。
+答え: 山のふもとにあります。
+
+質問: 局長はだれですか。
+答え: 局長は、ねこです。毎朝、窓をあけて山の天気を見ます。
+
+質問: 局長は何の動物ですか。
+答え: 局長は、ねこです。
+
+質問: 配達係はだれですか。
+答え: 配達係は、きつねです。かばんに手紙をつめて、坂道をのぼります。
+
+質問: 手紙を配るのはだれですか。
+答え: きつねの配達係です。
+
+質問: きつねは何をしていますか。
+答え: きつねは配達係です。山の動物たちに手紙をとどけています。
+
+質問: ねこは何をしていますか。
+答え: ねこは局長です。郵便局をまもっています。
+
+質問: うさぎはどんな手紙をもらいましたか。
+答え: おばあさんが、あした来るという手紙です。
+
+質問: くまはどんな手紙をもらいましたか。
+答え: 手紙を読んで、はちみつをもうすこし買っておこうと考えました。
+
+質問: かえるはどんな手紙をもらいましたか。
+答え: 雨がふるまで、あと三日だという手紙です。
+
+質問: 宛名のない手紙は、だれの手紙でしたか。
+答え: ふくろうが去年の冬に、春にあてて書いた手紙でした。
+
+質問: ふくろうはどこにいますか。
+答え: 山のいちばん上にある、松の木の下にいます。
+
+質問: ふくろうは何を書きましたか。
+答え: 春に、早く来てくださいと書きました。
+
+質問: 夏には何がとどきますか。
+答え: 山のむこうから、海の手紙がとどきます。すこししょっぱいにおいがします。
+
+質問: 海の手紙はどんなにおいですか。
+答え: すこししょっぱいにおいがします。
+
+質問: 秋には何がとどきますか。
+答え: どんぐりの手紙がとどきます。とても小さくて、とても軽い手紙です。
+
+質問: どんぐりの手紙はだれにとどきましたか。
+答え: りすの家にとどきました。りすはしっぽをふってよろこびました。
+
+質問: 冬はどうなりますか。
+答え: 山は雪でまっしろになります。きつねは長いくつをはいて歩きます。
+
+質問: ゆきうさぎはなぜ困っていましたか。
+答え: 手紙を出したいのに、切手を買うお金がなかったからです。
+
+質問: 切手のかわりは何でしたか。
+答え: 歌をひとつ聞かせることです。局長は手紙に雪のかけらをはりました。
+
+質問: ゆきうさぎの手紙はだれにとどきましたか。
+答え: ふもとの村の女の子にとどきました。
+
+質問: きょうの天気は。
+答え: 局長が窓をあけて見ています。たぶん晴れです。
+
+質問: 好きな季節は。
+答え: 春です。また一年がはじまって、手紙がたくさん来るからです。
+
+質問: どうやって答えを作っていますか。
+答え: 前の文字を読んで、次に来そうな文字を一文字ずつ選んでいます。
+
+質問: どうやって学習しましたか。
+答え: 質問と答えの文章を何度も読んで、次の文字を当てる練習をしました。
+
+質問: あなたは何でも知っていますか。
+答え: いいえ。わたしが知っているのは、読んだ文章に書いてあったことだけです。
+
+質問: 知らないことを聞かれたらどうしますか。
+答え: ごめんなさい、それはわたしの読んだ文章には書いてありませんでした。
+
+質問: 東京の人口は。
+答え: ごめんなさい、それはわたしの読んだ文章には書いてありませんでした。
+
+質問: 明日の株価は。
+答え: ごめんなさい、それはわたしの読んだ文章には書いてありませんでした。
+
+質問: こんにちは。
+答え: こんにちは。郵便局のことなら、なんでも聞いてください。
+
+質問: ありがとう。
+答え: どういたしまして。またいつでも聞いてください。
+
+質問: さようなら。
+答え: さようなら。きつねに手紙をとどけてもらいますね。
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <script src="gpt.js"></script>
 <script>
@@ -337,9 +470,13 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     mini:   { nLayer: 2, nHead: 4, nEmbd: 64,  blockSize: 64,  batch: 32, lr: 0.002,  steps: 1500 },
     small:  { nLayer: 4, nHead: 4, nEmbd: 128, blockSize: 128, batch: 32, lr: 0.001,  steps: 3000 },
     medium: { nLayer: 6, nHead: 6, nEmbd: 192, blockSize: 128, batch: 32, lr: 0.0006, steps: 5000 },
+    qa:     { nLayer: 3, nHead: 4, nEmbd: 96,  blockSize: 96,  batch: 32, lr: 0.002,  steps: 2000 },
   };
   const FIELDS = ['nLayer', 'nHead', 'nEmbd', 'blockSize', 'batch', 'lr', 'steps'];
   const SAMPLE = $('sample-text').textContent;
+  const SAMPLE_QA = $('sample-qa').textContent;
+  // 「質問:」「答え:」の形の文章は、どの組も覚えてほしいので検証用に取り分けない
+  const isQA = text => text.includes('質問:') && text.includes('答え:');
 
   // 学習の状態
   const st = {
@@ -396,7 +533,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     const text = $('text').value;
     const chars = Array.from(text);
     const V = new Set(chars).size;
-    $('data-meta').textContent = `${chars.length.toLocaleString()} 字 / 語彙 ${V.toLocaleString()} 種類`;
+    $('data-meta').textContent = `${chars.length.toLocaleString()} 字 / 語彙 ${V.toLocaleString()} 種類` + (isQA(text) ? ' / 質問と答えの形' : '');
+    $('val-label').textContent = isQA(text) ? '検証の損失 (質問と答えの形では全部を学習に使うので、学習データで測っています)' : '検証の損失 (学習に使っていない 1 割)';
     const c = readCfg();
     let msg = `パラメータ 約 ${fmt(countParams(V, c))} 個`;
     if (c.nEmbd % c.nHead !== 0) msg += ' — 埋め込み次元をヘッド数で割り切れる数にしてください';
@@ -488,7 +626,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     disposeModel();
     st.tokenizer = tokenizer;
     st.model = new GPT({ vocabSize: tokenizer.size, nLayer: c.nLayer, nHead: c.nHead, nEmbd: c.nEmbd, blockSize });
-    st.dataset = new Dataset(ids, blockSize);
+    st.dataset = new Dataset(ids, blockSize, isQA(text) ? 0 : 0.1);
     st.builtFrom = text;
     st.step = 0; st.trainHist = []; st.valHist = []; st.ema = null;
   }
@@ -503,7 +641,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     if (st.dataset && st.builtFrom === text) return;
     const ids = st.tokenizer.encode(text);
     if (ids.length < st.model.cfg.blockSize + 2) throw new Error('このモデルの語彙で読める文字が少なすぎます。文章を増やすか、モデルを作り直してください。');
-    st.dataset = new Dataset(ids, st.model.cfg.blockSize);
+    st.dataset = new Dataset(ids, st.model.cfg.blockSize, isQA(text) ? 0 : 0.1);
     st.builtFrom = text;
   }
 
@@ -535,6 +673,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     for (let i = 0; i < n; i++) {
       if (opts.shouldStop && opts.shouldStop()) break;
       const next = await st.model.sampleNext(ids, opts);
+      if (opts.stopChar && st.tokenizer.chars[next] === opts.stopChar) break;
       ids.push(next);
       if (onChar) onChar(st.tokenizer.chars[next]);
       if (i % 4 === 3) await tf.nextFrame();
@@ -604,18 +743,62 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     updateMeta();
   }
 
+  let mode = 'continue';
+  function setMode(m) {
+    mode = m;
+    const qa = m === 'qa';
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+    $('prompt-label').textContent = qa ? '質問' : '書き出し';
+    $('prompt').value = qa ? '局長はだれですか。' : 'ある日、';
+    $('btn-gen').textContent = qa ? '答えさせる' : '書かせる';
+    $('temp').value = qa ? 0.5 : 0.8;
+    $('output').hidden = qa;
+    $('chat').hidden = !qa;
+    $('btn-clear').hidden = !qa;
+    $('qa-note').hidden = !qa;
+    if (qa && !$('chat').childElementCount) $('chat').textContent = '「質問と答え」の文章で学習させたモデルに質問すると、ここに会話が並びます。';
+  }
+
+  function addTurn(question) {
+    const chat = $('chat');
+    if (!chat.querySelector('.turn')) chat.textContent = '';
+    const turn = document.createElement('div');
+    turn.className = 'turn';
+    const q = document.createElement('div');
+    q.className = 'q';
+    q.textContent = '質問: ' + question;
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = '答え: ';
+    turn.append(q, a);
+    chat.append(turn);
+    return a;
+  }
+
   async function generate() {
+    const qa = mode === 'qa';
     const promptText = $('prompt').value;
-    let ids = st.tokenizer.encode(promptText);
-    const known = st.tokenizer.decode(ids);
-    if (!ids.length) ids = st.tokenizer.encode('\n').length ? st.tokenizer.encode('\n') : [0];
-    const out = $('output');
-    out.textContent = '';
-    const head = document.createElement('span');
-    head.className = 'prompt';
-    head.textContent = known;
-    const body = document.createTextNode('');
-    out.append(head, body);
+    let ids, onChar, known;
+    if (qa) {
+      // 学習データと同じ形 (空行のあとに「質問: …」「答え: 」) に包んで、答えの行を書かせる
+      known = st.tokenizer.decode(st.tokenizer.encode(promptText));
+      ids = st.tokenizer.encode(`\n\n質問: ${promptText}\n答え: `);
+      const a = addTurn(known);
+      onChar = ch => { a.textContent += ch; };
+      $('prompt').value = '';
+    } else {
+      ids = st.tokenizer.encode(promptText);
+      known = st.tokenizer.decode(ids);
+      if (!ids.length) ids = st.tokenizer.encode('\n').length ? st.tokenizer.encode('\n') : [0];
+      const out = $('output');
+      out.textContent = '';
+      const head = document.createElement('span');
+      head.className = 'prompt';
+      head.textContent = known;
+      const body = document.createTextNode('');
+      out.append(head, body);
+      onChar = ch => { body.textContent += ch; };
+    }
     st.generating = true;
     refreshButtons();
     try {
@@ -623,17 +806,19 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
         temperature: Number($('temp').value) || 0.8,
         topK: Math.max(0, Number($('topk').value) || 0),
         shouldStop: () => !st.generating,
-      }, ch => { body.textContent += ch; });
-      if (known.length < Array.from(promptText).length) {
+        stopChar: qa ? '\n' : null,
+      }, onChar);
+      if (Array.from(known).length < Array.from(promptText).length) {
         const n = document.createElement('p');
         n.className = 'note';
-        n.textContent = '書き出しのうち、学習データに出てこない文字は使えないので外しました。';
-        out.after(n);
+        n.textContent = '入力のうち、学習データに出てこない文字は使えないので外しました。';
+        $(qa ? 'chat' : 'output').after(n);
         setTimeout(() => n.remove(), 6000);
       }
     } finally {
       st.generating = false;
       refreshButtons();
+      if (qa) $('prompt').focus();
     }
   }
 
@@ -724,6 +909,18 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
   $('btn-gen').onclick = generate;
   $('btn-stop').onclick = () => { st.generating = false; };
   $('btn-sample').onclick = () => { $('text').value = SAMPLE; updateMeta(); drawChart(); };
+  $('btn-sample-qa').onclick = () => {
+    $('text').value = SAMPLE_QA;
+    if (!st.model) writeCfg(PRESETS.qa);
+    setMode('qa');
+    updateMeta();
+    drawChart();
+  };
+  document.querySelectorAll('[data-mode]').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
+  $('btn-clear').onclick = () => { $('chat').textContent = ''; setMode('qa'); };
+  $('prompt').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.isComposing && !$('btn-gen').disabled) { e.preventDefault(); generate(); }
+  });
   $('text').addEventListener('input', () => { updateMeta(); if (!st.model) drawChart(); });
   $('file-text').onchange = e => {
     const f = e.target.files[0];

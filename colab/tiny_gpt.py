@@ -147,7 +147,9 @@ def train(text, n_layer=6, n_head=8, n_embd=256, block_size=256, batch_size=64,
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     tok = CharTokenizer.from_text(text)
     data = torch.tensor(tok.encode(text), dtype=torch.long)
-    n = int(len(data) * 0.9)
+    # 「質問:」「答え:」の形の文章は、どの組も覚えてほしいので検証用に取り分けない
+    is_qa = "質問:" in text and "答え:" in text
+    n = len(data) if is_qa else int(len(data) * 0.9)
     train_data, val_data = data[:n], data[n:]
     if len(val_data) <= block_size + 1:
         val_data = train_data
