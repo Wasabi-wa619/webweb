@@ -5,8 +5,9 @@
 - **ブラウザ版** (`index.html`): 文章を貼り付けて「学習を始める」を押すだけ。インストール不要で、計算はブラウザの GPU (WebGL) で行います。
 - **Colab 版** (`colab/tiny_gpt.ipynb`): 手元に GPU が無くても、Google Colab の無料 GPU で大きめのモデルを学習できます。学習したモデルはブラウザ版で読み込めます。
 - **チャットボット版** (`colab/chat_finetune.ipynb`): 日本語を話せる公開モデル (Qwen2.5-Instruct) に、自分の「質問と答え」を LoRA で追加学習させます。ChatGPT のように質問に答えるものを作りたいときはこちらです。
+- **チャット画面** (`chat/`): ChatGPT のような画面で、追加学習したモデルを**ブラウザの中だけ**で動かします (WebGPU)。チャットボット版のノートブックの最後で、Hugging Face に無料で公開できます。
 
-2 つは同じ構造のモデルで、重みの名前と形も揃えてあります。Colab で学習した `tiny_gpt.json` をブラウザ版で開くと、PyTorch で計算したときと同じ出力になります (誤差 1e-5 以下)。
+ブラウザ版と Colab 版は同じ構造のモデルで、重みの名前と形も揃えてあります。Colab で学習した `tiny_gpt.json` をブラウザ版で開くと、PyTorch で計算したときと同じ出力になります (誤差 1e-5 以下)。
 
 ## 使い方
 
@@ -55,6 +56,23 @@ python colab/tiny_gpt.py 自分の文章.txt --layers 6 --heads 8 --embd 256 --s
 
 もとのモデルが日本語と一般常識をすでに知っているので、教えていない質問にもそれらしく答えます。そこに、教えた知識・口調・キャラクターが加わります。
 
+### ChatGPT のようなページにして公開する (Colab を閉じても使える)
+
+チャットボット版のノートブックの最後「ブラウザで動く形にして公開する」まで進むと、次のことを自動で行います。
+
+1. LoRA をもとのモデルに足し込み、ブラウザで動く形 (ONNX、4 ビット) に変換する (`colab/export_web.py`)
+2. モデルを Hugging Face のリポジトリ (`あなたの名前/my-chat-model`) に置く
+3. チャット画面 (`chat/`) を Hugging Face の静的な Space (`あなたの名前/my-chat`) に置き、そのモデルと口調を最初から使うよう設定する
+
+必要なのは Hugging Face の無料アカウントと、書き込みできるアクセストークンだけです。できたページを開くと、モデルを一度だけダウンロードし、あとは開いた人の端末の中で動きます。サーバー代はかかりません。
+
+- ブラウザが誰でもダウンロードできるよう、モデルとページは**公開**になります。見られて困る内容は学習データに入れないでください
+- ブラウザで動かすなら `Qwen/Qwen2.5-0.5B-Instruct` (ダウンロード約 800 MB) がおすすめです。`1.5B` は日本語がずっと上手ですが、1.5 GB を超えて重くなります
+- Chrome / Edge (WebGPU 対応) だと速く動きます。WebGPU が無いブラウザでは CPU で動くので遅くなります
+- 変換の道具 (optimum-onnx) は transformers 4.57 でしか動かないので、ノートブックでは別の Python 環境を作って実行します
+
+チャット画面は、自分のモデルが無くても試せます。このフォルダで `python3 -m http.server 8000` を実行し、`http://localhost:8000/chat/` を開くと、公開されている `onnx-community/Qwen2.5-0.5B-Instruct` で動きます。別のモデルを使うときは、画面の「設定」か `?model=あなたの名前/my-chat-model` で指定します。
+
 ## モデルのしくみ
 
 文字単位の GPT (デコーダだけの Transformer) です。GPT-2 と同じ形を小さくしたものです。
@@ -71,6 +89,8 @@ python colab/tiny_gpt.py 自分の文章.txt --layers 6 --heads 8 --embd 256 --s
 | `index.html` | ブラウザ版の画面 |
 | `colab/tiny_gpt.py` | Colab 版のモデルと学習 (PyTorch)。`gpt.js` と同じ構造 |
 | `colab/chat_finetune.py` | チャットボット版。質問と答えの読み込み、LoRA の追加学習、会話 |
+| `colab/export_web.py` | 追加学習したモデルをブラウザ用 (ONNX、4 ビット) に変換し、Hugging Face にモデルとチャット画面を置く |
+| `chat/` | ChatGPT のようなチャット画面。`worker.js` が transformers.js でモデルを動かし、`config.js` が最初に使うモデルを決める |
 | `colab/*.ipynb` | Colab で開くノートブック。`python colab/make_notebook.py` で `.py` から作り直せます |
 | `sample.txt` | 例の文章 (このリポジトリのために書いたお話) |
 | `sample_qa.txt` | 例の質問と答え (同じお話の世界について) |

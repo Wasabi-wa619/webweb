@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ちいさなGPT チャット</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* レイアウト: 左に会話の一覧、右に会話。下に入力欄を固定。狭い画面では一覧を引き出しにする。 */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --side: #e7ebef;
+  --ink: #18212e;
+  --muted: #5b6675;
+  --line: #d5dbe3;
+  --accent: #0f7a6b;
+  --accent-ink: #ffffff;
+  --user: #dfeeea;
+  --danger: #b4372f;
+  --font-display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151c; --surface: #171e27; --side: #0c1117; --ink: #e6ebf1; --muted: #93a0b0; --line: #2a3442;
+    --accent: #3fbfa9; --accent-ink: #06201b; --user: #1c3a35; --danger: #f07a70;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151c; --surface: #171e27; --side: #0c1117; --ink: #e6ebf1; --muted: #93a0b0; --line: #2a3442;
+  --accent: #3fbfa9; --accent-ink: #06201b; --user: #1c3a35; --danger: #f07a70;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.75;
+}
+[hidden] { display: none !important; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-columns: 264px minmax(0, 1fr); height: 100%; }
+
+/* --- 会話の一覧 --- */
+aside {
+  background: var(--side); border-right: 1px solid var(--line);
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px;
+  padding: max(14px, env(safe-area-inset-top, 0px)) 12px max(14px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  min-height: 0;
+}
+.brand { font-family: var(--font-display); font-size: 19px; letter-spacing: 0.02em; padding: 2px 6px; }
+.new-chat {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 12px; font-weight: 700;
+}
+.new-chat:hover { border-color: var(--accent); }
+.convs { overflow-y: auto; display: grid; align-content: start; gap: 2px; min-height: 0; }
+.conv {
+  display: flex; align-items: center; gap: 4px; border-radius: 6px;
+}
+.conv button.open {
+  flex: 1; min-width: 0; text-align: left; border: 0; background: none; cursor: pointer;
+  padding: 7px 10px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px;
+}
+.conv[aria-current="true"] button.open { background: var(--surface); font-weight: 700; }
+.conv button.open:hover { background: var(--surface); }
+.conv button.del { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 4px 8px; border-radius: 6px; opacity: 0; }
+.conv:hover button.del, .conv[aria-current="true"] button.del, .conv button.del:focus-visible { opacity: 1; }
+.conv button.del:hover { color: var(--danger); }
+.side-foot { font-size: 12px; color: var(--muted); line-height: 1.6; padding: 0 6px; }
+
+/* --- 会話 --- */
+main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
+.top {
+  display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: var(--bg);
+  padding: max(10px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 10px 16px;
+}
+.icon-btn { border: 1px solid transparent; background: none; border-radius: 8px; padding: 6px 9px; cursor: pointer; line-height: 1; }
+.icon-btn:hover { border-color: var(--line); }
+.menu-btn { display: none; }
+.model-name { font-weight: 700; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill {
+  font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+}
+.pill[data-s="ready"] { color: var(--accent); border-color: var(--accent); }
+.pill[data-s="error"] { color: var(--danger); border-color: var(--danger); }
+.spacer { flex: 1; }
+
+.scroll { overflow-y: auto; min-height: 0; }
+.thread {
+  max-width: 760px; margin: 0 auto; display: grid; gap: 22px;
+  padding-block: 24px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.msg { display: grid; gap: 4px; min-width: 0; }
+.msg.user { justify-items: end; }
+.msg.user .body {
+  background: var(--user); border-radius: 18px 18px 4px 18px; padding: 9px 15px; max-width: 85%;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg.assistant .body { word-break: break-word; min-width: 0; }
+.msg .body p { margin: 0 0 0.7em; }
+.msg .body p:last-child { margin-bottom: 0; }
+.msg .body ul, .msg .body ol { margin: 0 0 0.7em; padding-left: 1.4em; }
+.msg .body pre {
+  background: var(--side); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; margin: 0 0 0.7em;
+}
+.msg .body code { font-family: var(--font-mono); font-size: 0.9em; }
+.msg .body :not(pre) > code { background: var(--side); padding: 1px 5px; border-radius: 4px; }
+.msg .meta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.cursor::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor::after { animation: none; } }
+
+/* 最初の画面 */
+.welcome { display: grid; gap: 18px; justify-items: center; text-align: center; padding-top: 6vh; }
+.welcome h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(26px, 4.5vw, 36px); margin: 0; line-height: 1.25; text-wrap: balance; }
+.welcome p { margin: 0; color: var(--muted); max-width: 52ch; }
+.load-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px;
+  display: grid; gap: 12px; width: min(100%, 460px); text-align: left;
+}
+.load-card .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.small { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; word-break: break-all; }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 620px; }
+.example {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 14px;
+  cursor: pointer; font-size: 14px; text-align: left;
+}
+.example:hover { border-color: var(--accent); }
+.btn {
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  border-radius: 8px; padding: 8px 16px; font-weight: 700; cursor: pointer;
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 入力欄 */
+.composer-wrap {
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: var(--bg);
+}
+.composer {
+  max-width: 760px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 8px 8px 8px 14px;
+}
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea {
+  flex: 1; min-width: 0; border: 0; background: none; resize: none; outline: none;
+  max-height: 200px; padding: 6px 0; line-height: 1.6;
+}
+.send {
+  width: 38px; height: 38px; flex: none; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); font-size: 17px; line-height: 1;
+}
+.send:disabled { opacity: 0.35; cursor: not-allowed; }
+.disclaimer { max-width: 760px; margin: 6px auto 0; text-align: center; font-size: 12px; color: var(--muted); }
+
+/* 設定 */
+dialog {
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink);
+  width: min(560px, calc(100% - 32px)); padding: 20px;
+}
+dialog::backdrop { background: rgba(10, 14, 20, 0.45); }
+dialog h2 { margin: 0 0 12px; font-size: 17px; }
+dialog form { display: grid; gap: 14px; }
+dialog label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+dialog input, dialog textarea {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 8px 10px; color: var(--ink); width: 100%;
+}
+dialog textarea { min-height: 90px; resize: vertical; }
+dialog .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  aside {
+    position: fixed; inset: 0 auto 0 0; width: min(290px, 85vw); z-index: 20;
+    transform: translateX(-100%); transition: transform 0.2s;
+  }
+  .app.side-open aside { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, 0.25); }
+  .menu-btn { display: inline-block; }
+  .scrim { position: fixed; inset: 0; background: rgba(10, 14, 20, 0.4); z-index: 15; }
+}
+@media (prefers-reduced-motion: reduce) { aside { transition: none; } .bar i { transition: none; } }
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+  <aside id="side" aria-label="会話の一覧">
+    <div class="brand">ちいさなGPT</div>
+    <button class="new-chat" id="btn-new" type="button">＋ 新しいチャット</button>
+    <nav class="convs" id="convs"></nav>
+    <div class="side-foot">会話はこのブラウザの中だけに保存されます。モデルもこの端末で動いていて、入力した文章はどこにも送られません。</div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <main>
+    <div class="top">
+      <button class="icon-btn menu-btn" id="btn-menu" type="button" aria-label="会話の一覧を開く">☰</button>
+      <span class="model-name" id="model-name"></span>
+      <span class="pill" id="status" data-s="idle">未読み込み</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="btn-settings" type="button" aria-label="設定">⚙ 設定</button>
+    </div>
+
+    <div class="scroll" id="scroll">
+      <div class="thread" id="thread"></div>
+    </div>
+
+    <div class="composer-wrap">
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="メッセージを入力 (Enter で送信、Shift+Enter で改行)" aria-label="メッセージ"></textarea>
+        <button class="send" id="btn-send" type="submit" aria-label="送信" disabled>↑</button>
+      </form>
+      <p class="disclaimer">小さなモデルなので、まちがったことも自信ありげに言います。大事なことは確かめてください。</p>
+    </div>
+  </main>
+</div>
+
+<dialog id="settings">
+  <h2>設定</h2>
+  <form method="dialog" id="settings-form">
+    <label>モデル (Hugging Face のリポジトリ名)
+      <input id="set-model" type="text" spellcheck="false" autocomplete="off">
+    </label>
+    <label>キャラクター・口調の指示 (システムプロンプト)
+      <textarea id="set-system"></textarea>
+    </label>
+    <div class="grid2">
+      <label>温度 (0 で毎回同じ答え)<input id="set-temp" type="number" min="0" max="2" step="0.1"></label>
+      <label>答えの最大の長さ (トークン)<input id="set-max" type="number" min="16" max="4096" step="16"></label>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" type="button" id="set-reset">初期設定に戻す</button>
+      <button class="btn ghost" value="cancel" type="submit">閉じる</button>
+      <button class="btn" value="save" type="submit" id="set-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const CFG = window.CHAT_CONFIG || {};
+  const DEFAULTS = {
+    model: CFG.model || 'onnx-community/Qwen2.5-0.5B-Instruct',
+    system: CFG.system || 'あなたは親切なアシスタントです。日本語で、わかりやすく簡潔に答えます。',
+    temperature: 0.7,
+    maxTokens: 512,
+    remoteHost: CFG.remoteHost || '',
+  };
+  const EXAMPLES = ['自己紹介してください', '日本の四季について短く説明して', '朝ごはんの献立を3つ考えて', 'Python でリストを逆順にする方法は?'];
+  const HISTORY_TURNS = 6; // 直近の何往復をモデルに見せるか (長すぎると遅く、メモリも足りなくなる)
+
+  // ---------- 保存 (ブラウザの中だけ) ----------
+  const store = {
+    get(k, fallback) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 保存できない環境 */ } },
+  };
+  const params = new URLSearchParams(location.search);
+  let settings = Object.assign({}, DEFAULTS, store.get('chat.settings', {}));
+  if (params.get('model')) settings.model = params.get('model');
+  let convs = store.get('chat.conversations', []);
+  let current = null;           // 表示中の会話
+  const st = { loaded: false, loading: false, busy: false, device: '' };
+
+  // ---------- モデルとのやりとり ----------
+  let worker = null;
+  let onToken = null, onDone = null, onReady = null, onError = null, onStop = null;
+  function startWorker() {
+    worker = new Worker('worker.js', { type: 'module' });
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'progress') showProgress(data.loaded, data.total);
+      else if (data.type === 'ready') { st.loaded = true; st.loading = false; st.device = data.device; onReady && onReady(); }
+      else if (data.type === 'token') onToken && onToken(data.text);
+      else if (data.type === 'done') onDone && onDone(data);
+      else if (data.type === 'error') onError && onError(data.message);
+    };
+    worker.onerror = e => { onError && onError(e.message || 'ワーカーを起動できませんでした'); };
+  }
+  startWorker();
+
+  // 止める。CPU (WASM) で動いているときは生成中にメッセージが届かないことがあるので、
+  // 少し待っても止まらなければワーカーごと作り直す (モデルはブラウザに保存済みなので再ダウンロードはない)
+  function stopGenerating() {
+    worker.postMessage({ type: 'interrupt' });
+    const stop = onStop;
+    if (stop) stop();
+    const w = worker;
+    setTimeout(() => {
+      if (worker === w && w.__generating) {
+        w.terminate();
+        st.loaded = false;
+        setStatus('idle', '未読み込み');
+        startWorker();
+      }
+    }, 1500);
+  }
+
+  function loadModel() {
+    if (st.loaded) return Promise.resolve();
+    if (st.loading) return new Promise((res, rej) => { const r = onReady, e = onError; onReady = () => { r && r(); res(); }; onError = m => { e && e(m); rej(new Error(m)); }; });
+    st.loading = true;
+    setStatus('loading', '読み込み中');
+    render();
+    return new Promise((resolve, reject) => {
+      onReady = () => {
+        setStatus('ready', st.device === 'webgpu' ? 'WebGPU' : 'CPU (WASM)');
+        render();
+        resolve();
+      };
+      onError = msg => {
+        st.loading = false;
+        setStatus('error', 'エラー');
+        loadError = msg;
+        render();
+        reject(new Error(msg));
+      };
+      loadError = '';
+      worker.postMessage({ type: 'load', model: settings.model, dtype: 'q4', remoteHost: settings.remoteHost || undefined });
+    });
+  }
+  let loadError = '';
+  let progress = { loaded: 0, total: 0 };
+  function showProgress(loaded, total) {
+    progress = { loaded, total };
+    const bar = document.querySelector('#load-bar i');
+    const txt = $('load-text');
+    if (bar && total) bar.style.width = (100 * loaded / total).toFixed(1) + '%';
+    if (txt) txt.textContent = total ? `${(loaded / 1e6).toFixed(0)} / ${(total / 1e6).toFixed(0)} MB をダウンロード中 (2 回目からは保存済みのものを使います)` : '準備中…';
+  }
+
+  // ---------- 表示 ----------
+  function setStatus(s, label) { $('status').dataset.s = s; $('status').textContent = label; }
+  function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  // かんたんな Markdown (コード、太字、箇条書き、段落) だけを扱う
+  function md(src) {
+    const parts = src.split(/```/);
+    return parts.map((part, i) => {
+      if (i % 2) {
+        const body = part.replace(/^[^\n]*\n/, '');
+        return `<pre><code>${esc(body.replace(/\n$/, ''))}</code></pre>`;
+      }
+      const inline = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      return part.split(/\n{2,}/).map(block => {
+        const lines = block.split('\n').filter(l => l.trim());
+        if (!lines.length) return '';
+        if (lines.every(l => /^\s*[-*・]\s+/.test(l))) return '<ul>' + lines.map(l => `<li>${inline(l.replace(/^\s*[-*・]\s+/, ''))}</li>`).join('') + '</ul>';
+        if (lines.every(l => /^\s*\d+[.)．]\s*/.test(l))) return '<ol>' + lines.map(l => `<li>${inline(l.replace(/^\s*\d+[.)．]\s*/, ''))}</li>`).join('') + '</ol>';
+        return `<p>${lines.map(inline).join('<br>')}</p>`;
+      }).join('');
+    }).join('');
+  }
+
+  function renderConvs() {
+    const nav = $('convs');
+    nav.textContent = '';
+    for (const c of convs) {
+      const row = document.createElement('div');
+      row.className = 'conv';
+      row.setAttribute('aria-current', String(current && c.id === current.id));
+      const open = document.createElement('button');
+      open.className = 'open'; open.type = 'button'; open.textContent = c.title || '新しいチャット';
+      open.onclick = () => { current = c; closeSide(); render(); };
+      const del = document.createElement('button');
+      del.className = 'del'; del.type = 'button'; del.textContent = '×'; del.setAttribute('aria-label', `「${c.title}」を消す`);
+      del.onclick = () => {
+        convs = convs.filter(x => x.id !== c.id);
+        if (current && current.id === c.id) current = null;
+        store.set('chat.conversations', convs);
+        render();
+      };
+      row.append(open, del);
+      nav.append(row);
+    }
+  }
+
+  function renderWelcome(thread) {
+    const w = document.createElement('div');
+    w.className = 'welcome';
+    w.innerHTML = `<h1>何でも聞いてください</h1>
+      <p>このチャットのモデルは、あなたの端末の中で動いています。最初に一度だけモデルをダウンロードします。</p>`;
+    if (!st.loaded) {
+      const card = document.createElement('div');
+      card.className = 'load-card';
+      card.innerHTML = `<div class="small">モデル: ${esc(settings.model)}</div>
+        <div class="bar" id="load-bar"><i></i></div>
+        <div class="small" id="load-text">${st.loading ? '準備中…' : '0.5B のモデルでおよそ 500〜800 MB です。Wi-Fi での利用をおすすめします。'}</div>
+        ${loadError ? `<div class="small" style="color:var(--danger)">読み込めませんでした: ${esc(loadError)}<br>モデル名が正しいか、onnx/model_q4.onnx を含むリポジトリか確かめてください。</div>` : ''}
+        <div class="row"><button class="btn" type="button" id="btn-load" ${st.loading ? 'disabled' : ''}>${st.loading ? '読み込み中…' : 'モデルを読み込む'}</button>
+        <span class="small">${navigator.gpu ? 'WebGPU が使えます' : 'WebGPU が使えないので CPU で動きます (遅め)'}</span></div>`;
+      w.append(card);
+      setTimeout(() => {
+        const b = $('btn-load');
+        if (b) b.onclick = () => loadModel().catch(() => {});
+        if (st.loading) showProgress(progress.loaded, progress.total);
+      });
+    }
+    const ex = document.createElement('div');
+    ex.className = 'examples';
+    for (const t of EXAMPLES) {
+      const b = document.createElement('button');
+      b.className = 'example'; b.type = 'button'; b.textContent = t;
+      b.onclick = () => send(t);
+      ex.append(b);
+    }
+    w.append(ex);
+    thread.append(w);
+  }
+
+  function msgEl(m) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + m.role;
+    const body = document.createElement('div');
+    body.className = 'body';
+    if (m.role === 'user') body.textContent = m.content;
+    else body.innerHTML = md(m.content);
+    el.append(body);
+    if (m.meta) {
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = m.meta;
+      el.append(meta);
+    }
+    return { el, body };
+  }
+
+  function render() {
+    renderConvs();
+    $('model-name').textContent = settings.model.split('/').pop();
+    $('model-name').title = settings.model;
+    const thread = $('thread');
+    thread.textContent = '';
+    if (!current || !current.messages.length) renderWelcome(thread);
+    else for (const m of current.messages) thread.append(msgEl(m).el);
+    updateSend();
+  }
+  function updateSend() {
+    const btn = $('btn-send');
+    btn.disabled = st.busy ? false : !$('input').value.trim();
+    btn.textContent = st.busy ? '■' : '↑';
+    btn.setAttribute('aria-label', st.busy ? '止める' : '送信');
+  }
+  function scrollDown() { const s = $('scroll'); s.scrollTop = s.scrollHeight; }
+
+  // ---------- 送信 ----------
+  async function send(text) {
+    text = text.trim();
+    if (!text || st.busy) return;
+    if (!current) {
+      current = { id: Date.now().toString(36), title: text.slice(0, 30), messages: [], updated: Date.now() };
+      convs.unshift(current);
+    }
+    current.messages.push({ role: 'user', content: text });
+    $('input').value = '';
+    autosize();
+    st.busy = true;
+    render();
+    scrollDown();
+    const conv = current;
+    try {
+      await loadModel();
+    } catch (e) {
+      conv.messages.pop();
+      if (!conv.messages.length) { convs = convs.filter(c => c !== conv); current = null; }
+      st.busy = false;
+      render();
+      return;
+    }
+    const history = conv.messages.slice(-(HISTORY_TURNS * 2 - 1));
+    const messages = [{ role: 'system', content: settings.system }, ...history];
+    const answer = { role: 'assistant', content: '' };
+    conv.messages.push(answer);
+    render();
+    const nodes = $('thread').lastElementChild.querySelector('.body');
+    nodes.classList.add('cursor');
+    scrollDown();
+    const id = Math.random().toString(36).slice(2);
+    worker.__generating = true;
+    const w = worker;
+    await new Promise(resolve => {
+      onStop = () => { answer.meta = '途中で止めました'; resolve(); };
+      onToken = t => {
+        const nearBottom = $('scroll').scrollHeight - $('scroll').scrollTop - $('scroll').clientHeight < 80;
+        answer.content += t;
+        nodes.innerHTML = md(answer.content);
+        if (nearBottom) scrollDown();
+      };
+      onDone = d => {
+        w.__generating = false;
+        answer.content = answer.content.trim();
+        answer.meta = `${st.device === 'webgpu' ? 'WebGPU' : 'CPU'} · 約 ${d.tokensPerSec.toFixed(1)} トークン/秒`;
+        resolve();
+      };
+      onError = msg => {
+        w.__generating = false;
+        answer.content = answer.content || '(答えを作れませんでした: ' + msg + ')';
+        resolve();
+      };
+      worker.postMessage({ type: 'generate', id, messages, temperature: Number(settings.temperature), maxTokens: Number(settings.maxTokens) });
+    });
+    // 止めたあとに遅れて届く文字は捨てる。done が来たら「生成中」を下ろす
+    onToken = onStop = null;
+    onDone = () => { w.__generating = false; };
+    answer.content = answer.content.trim();
+    conv.updated = Date.now();
+    convs.sort((a, b) => b.updated - a.updated);
+    store.set('chat.conversations', convs);
+    st.busy = false;
+    render();
+    scrollDown();
+  }
+
+  // ---------- 操作 ----------
+  function autosize() { const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; }
+  $('input').addEventListener('input', () => { autosize(); updateSend(); });
+  $('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!st.busy) send($('input').value); }
+  });
+  $('composer').addEventListener('submit', e => {
+    e.preventDefault();
+    if (st.busy) stopGenerating();
+    else send($('input').value);
+  });
+  $('btn-new').onclick = () => { current = null; closeSide(); render(); $('input').focus(); };
+  function closeSide() { $('app').classList.remove('side-open'); $('scrim').hidden = true; }
+  $('btn-menu').onclick = () => { $('app').classList.add('side-open'); $('scrim').hidden = false; };
+  $('scrim').onclick = closeSide;
+
+  function fillSettings(s) {
+    $('set-model').value = s.model; $('set-system').value = s.system;
+    $('set-temp').value = s.temperature; $('set-max').value = s.maxTokens;
+  }
+  $('btn-settings').onclick = () => { fillSettings(settings); $('settings').showModal(); };
+  $('set-reset').onclick = () => fillSettings(DEFAULTS);
+  $('settings').addEventListener('close', () => {
+    if ($('settings').returnValue !== 'save') return;
+    const next = Object.assign({}, settings, {
+      model: $('set-model').value.trim() || DEFAULTS.model,
+      system: $('set-system').value.trim() || DEFAULTS.system,
+      temperature: Math.max(0, Number($('set-temp').value) || 0),
+      maxTokens: Math.max(16, Number($('set-max').value) || DEFAULTS.maxTokens),
+    });
+    const modelChanged = next.model !== settings.model;
+    settings = next;
+    store.set('chat.settings', settings);
+    if (modelChanged) { st.loaded = false; loadError = ''; setStatus('idle', '未読み込み'); }
+    render();
+  });
+
+  render();
+  window.__chat = { st, get settings() { return settings; }, get convs() { return convs; } }; // 動作確認用
+})();
+</script>
+</body>
+</html>

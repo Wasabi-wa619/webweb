@@ -9,6 +9,8 @@ here = pathlib.Path(__file__).parent
 src = (here / "tiny_gpt.py").read_text(encoding="utf-8")
 sample = (here.parent / "sample.txt").read_text(encoding="utf-8")
 chat_src = (here / "chat_finetune.py").read_text(encoding="utf-8")
+export_src = (here / "export_web.py").read_text(encoding="utf-8")
+chat_app = {name: (here.parent / "chat" / name).read_text(encoding="utf-8") for name in ("index.html", "worker.js")}
 sample_qa = (here.parent / "sample_qa.txt").read_text(encoding="utf-8")
 
 
@@ -93,7 +95,8 @@ chat_cells = [
 
 1. メニューの **ランタイム → ランタイムのタイプを変更** で **T4 GPU** を選ぶ
 2. 上のセルから順に実行する (▶ ボタン、または Shift+Enter)
-3. 途中のセルで、ブラウザから話しかけられるチャット画面の URL が出ます
+3. 途中のセルで、ブラウザから話しかけられるチャット画面の URL が出ます (Colab を開いている間だけ)
+4. 最後の「ブラウザで動く形にして公開する」まで進むと、Colab を閉じても使える ChatGPT のようなページが Hugging Face にできます
 """),
     code("""
 !pip install -q "transformers>=4.56" peft accelerate
@@ -131,12 +134,15 @@ print(name, 'を my_qa.txt にしました')
     md("""
 ## 3. 設定
 
-- `MODEL`: もとにするモデル。T4 なら `Qwen/Qwen2.5-1.5B-Instruct` がおすすめ。速さ優先なら `Qwen/Qwen2.5-0.5B-Instruct`、日本語の上手さ優先なら `Qwen/Qwen2.5-3B-Instruct` (遅く、メモリもぎりぎり)
+- `MODEL`: もとにするモデル。
+  - `Qwen/Qwen2.5-0.5B-Instruct` (既定): ブラウザで動かすならこれ。ダウンロードはおよそ 800 MB で、ふつうのノート PC でも動きます
+  - `Qwen/Qwen2.5-1.5B-Instruct`: 日本語がずっと上手。ブラウザでは 1.5 GB を超え、GPU の弱い PC では重くなります
+  - `Qwen/Qwen2.5-3B-Instruct`: Colab の中だけで使うとき向け (ブラウザには大きすぎます)
 - `SYSTEM`: キャラクターや口調の指示。学習のときも会話のときも同じものを使います
 - `EPOCHS`: データを何周読むか。組が少ない (〜100) なら 10 前後、数千あるなら 2〜3
 """),
     code("""
-MODEL = 'Qwen/Qwen2.5-1.5B-Instruct'
+MODEL = 'Qwen/Qwen2.5-0.5B-Instruct'
 SYSTEM = 'あなたは山の郵便局で育った「ちいさなGPT」です。やさしい口調で、短く答えます。'
 EPOCHS = 10
 
@@ -200,7 +206,7 @@ gr.ChatInterface(reply, title='ちいさなGPT').launch(share=True, debug=True)
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
-base = AutoModelForCausalLM.from_pretrained('Qwen/Qwen2.5-1.5B-Instruct', dtype='auto').to('cuda')
+base = AutoModelForCausalLM.from_pretrained('Qwen/Qwen2.5-0.5B-Instruct', dtype='auto').to('cuda')  # 学習に使った MODEL
 model = PeftModel.from_pretrained(base, 'my_lora')
 tok = AutoTokenizer.from_pretrained('my_lora')
 ```
@@ -211,6 +217,51 @@ tok.save_pretrained('my_lora')
 !zip -qr my_lora.zip my_lora
 from google.colab import files
 files.download('my_lora.zip')
+"""),
+    md("""
+## 9. ブラウザで動く形にして公開する
+
+Colab を閉じても使えるように、モデルをブラウザで動く形 (ONNX、4 ビット) にして Hugging Face に置き、
+ChatGPT のようなチャット画面も Hugging Face の Space (無料の静的ページ) に置きます。
+チャットを開いた人の端末でモデルが動くので、サーバー代はかかりません。
+
+用意するもの:
+1. [Hugging Face](https://huggingface.co/join) のアカウント (無料)
+2. 書き込みできるアクセストークン: [Settings → Access Tokens](https://huggingface.co/settings/tokens) で「Create new token」→ 種類は **Write**
+
+**注意**: ブラウザが誰でもダウンロードできるように、モデルとチャット画面は**公開**になります。人に見られて困る内容を学習データに入れないでください。
+"""),
+    md("まず、変換用の道具を別の環境に入れます (変換の道具は少し古い transformers でしか動かないため)。数分かかります。"),
+    code("""
+!pip install -q virtualenv
+!virtualenv -q --system-site-packages /content/webenv
+!/content/webenv/bin/pip install -q "optimum-onnx[onnxruntime]==0.1.0" "peft<0.19" onnx_ir
+!/content/webenv/bin/python -c "import transformers, optimum.exporters.onnx; print('変換の準備ができました (transformers', transformers.__version__, ')')"
+"""),
+    code("%%writefile export_web.py\n" + export_src),
+    code("import pathlib\npathlib.Path('chat').mkdir(exist_ok=True)\n" + "".join(
+        f"pathlib.Path('chat/{name}').write_text({json.dumps(text, ensure_ascii=False)}, encoding='utf-8')\n"
+        for name, text in chat_app.items()) + "print('チャット画面のファイルを書き出しました')"),
+    md("アクセストークンを入力します。入力欄が出たら、作ったトークンを貼り付けてください。"),
+    code("""
+from huggingface_hub import login, whoami
+login()
+HF_USER = whoami()['name']
+print('ログインしました:', HF_USER)
+"""),
+    code("""
+import subprocess
+REPO = f'{HF_USER}/my-chat-model'   # モデルを置く場所
+SPACE = f'{HF_USER}/my-chat'        # チャット画面を置く場所
+subprocess.run(['/content/webenv/bin/python', 'export_web.py', 'my_lora', '--base', MODEL, '--out', 'web_model',
+                '--repo', REPO, '--space', SPACE, '--app', 'chat', '--system', SYSTEM], check=True)
+"""),
+    md("""
+表示された「チャット画面」の URL を開くと、ChatGPT のように話せます。
+
+- 最初に一度だけモデルをダウンロードします。2 回目からはブラウザに保存されたものを使います
+- Chrome か Edge (WebGPU に対応したもの) だと速く動きます。対応していないブラウザでは CPU で動くので遅くなります
+- 学習し直したら、このセルをもう一度実行すると、同じ URL のまま新しいモデルに入れ替わります
 """),
 ]
 
