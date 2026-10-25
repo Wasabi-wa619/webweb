@@ -1,57 +1,60 @@
-# webweb
+# ちいさなGPT工房
 
-JavaScript に対応した Web プロキシです。Node.js だけで動き、依存パッケージはありません。
+自分だけの言語モデル (GPT) を一から作って育てるためのキットです。
+
+- **ブラウザ版** (`index.html`): 文章を貼り付けて「学習を始める」を押すだけ。インストール不要で、計算はブラウザの GPU (WebGL) で行います。
+- **Colab 版** (`colab/tiny_gpt.ipynb`): 手元に GPU が無くても、Google Colab の無料 GPU で大きめのモデルを学習できます。学習したモデルはブラウザ版で読み込めます。
+
+2 つは同じ構造のモデルで、重みの名前と形も揃えてあります。Colab で学習した `tiny_gpt.json` をブラウザ版で開くと、PyTorch で計算したときと同じ出力になります (誤差 1e-5 以下)。
+
+## 使い方
+
+### ブラウザ版
 
 ```sh
-npm start                        # http://localhost:8080
-PORT=3000 npm start              # ポート変更
-SESSION_STORE=/path/to/db.json npm start  # クッキーの保存先
-npm test                         # テスト
+python3 -m http.server 8000    # このフォルダで実行し、http://localhost:8000/ を開く
 ```
 
-ブラウザで `http://localhost:8080/` を開き、URL か検索ワードを入力します。
-`http://localhost:8080/p/https://example.com/` のように、URL を直接指定することもできます。
+1. 「学習データ」に文章を入れる (例として短いお話が入っています。`.txt` ファイルも開けます)
+2. 「モデルの大きさ」を選ぶ。まずは「ミニ」がおすすめです
+3. 「学習を始める」を押す。損失のグラフが下がっていき、200 ステップごとに試し書きが出ます
+4. 「文章を書かせる」で書き出しを入れ、続きを書かせる
 
-## 仕組み
+学習したモデルは「このブラウザに保存」で残せます。直接開いたときは「JSON に書き出す」でファイルにもできます。
 
-**サーバー側** (`server.js`, `lib/`)
-- HTML: `href` / `src` / `srcset` / `action` / `style` / `<style>` / meta refresh などの URL を `/p/<URL>` に書き換えます
-- CSS: `url()` と `@import` を書き換えます
-- `Content-Security-Policy`、`X-Frame-Options`、`integrity` 属性など、プロキシ経由だと邪魔になるものを取り除きます
-- リダイレクト (`Location`) を書き換えます
-- クッキーはサーバー側でセッションごとに保存し、送り先のドメインやパスに合うものだけを送ります
-- 有効期限のあるクッキーはディスクに保存し、再起動後もセッションを維持します (`SESSION_STORE` で保存先を指定)
-- Shift_JIS や EUC-JP のページは UTF-8 に変換します
-- WebSocket は `/__px/ws` で中継します
-- `/api/...` のようにルートから始まるパスへのリクエストは、Referer を見て元のサイトへ振り分けます
+### Colab 版 (GPU が無いとき)
 
-**クライアント側** (`public/client.js`。プロキシしたページの `<head>` の先頭に挿入されます)
-- `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `Worker` / `sendBeacon` を経由させます
-- `history.pushState` と `replaceState`、`location.assign` / `location.replace`、`window.open` を経由させます
-- `location.href = ...` による移動は Navigation API で横取りします (Chromium 系のブラウザのみ)
-- `img.src` や `a.href` などのプロパティ、`setAttribute`、`innerHTML`、`insertAdjacentHTML` を書き換えます
-- `document.cookie` をサーバー側のクッキーと同期します
-- `localStorage` / `sessionStorage` は対象サイトのオリジンごとに名前空間を分け、サイト間で混ざらないようにします
-- `postMessage` と `MessageEvent.origin` のオリジンを補正します
-- `location` / `window.location` / `document.location` の**読み取り**も、対象サイトの値を返します (下記参照)
+1. [Google Colab](https://colab.research.google.com/) を開き、「ファイル → ノートブックをアップロード」で `colab/tiny_gpt.ipynb` を選ぶ
+2. 「ランタイム → ランタイムのタイプを変更」で **T4 GPU** を選ぶ
+3. セルを上から順に実行する。自分の文章をアップロードするセルもあります
+4. 最後のセルで `tiny_gpt.json` がダウンロードされる。ブラウザ版の「JSON を読み込む」で開く
 
-### location の読み取り (SPA 対策)
+手元に PyTorch があれば、スクリプトとしても動きます。
 
-多くの SPA ルーターは `location.pathname` などを読んで画面を切り替えます。そのままだとプロキシ側のパス (`/p/https://...`) が見えてしまうため、サーバー側で対象の `<script>` を `with(window.__pxScope){ ... }` で包み、コード中の裸の `location` ・ `window.location` ・ `document.location` ・ `document.URL` ・ `document.domain` が**本来のサイトの値**を返すようにしています。
+```sh
+python colab/tiny_gpt.py 自分の文章.txt --layers 6 --heads 8 --embd 256 --steps 3000
+```
 
-- 対象はクラシックなスクリプト (インライン・外部の両方) です。`location` / `top` / `parent` を参照し、`import` / `export` を含まないものだけを包みます。関数宣言や `var` はこれまでどおりグローバルに残ります。
-- `SCRIPT_SCOPE=0` で無効化できます。
+## モデルのしくみ
 
-## 制限
+文字単位の GPT (デコーダだけの Transformer) です。GPT-2 と同じ形を小さくしたものです。
 
-ブラウザだけで動くプロキシの構造上、どうしても残る制限です。
+1. 文章に出てくる文字に番号をふる (文字トークナイザ)
+2. 文字の埋め込みと位置の埋め込みを足す
+3. Transformer ブロックを何層か重ねる。各ブロックは「LayerNorm → 未来を見ない自己注意 → 残差」と「LayerNorm → MLP (GELU) → 残差」
+4. 最後に LayerNorm をかけ、語彙のすべての文字について「次に来る確率」を出す
+5. 本当の次の文字とのクロスエントロピーが小さくなるよう、Adam で重みを更新する (勾配のノルムを 1 で切りそろえ、学習率はウォームアップのあとコサインで下げる)
 
-- **ES モジュール (`type="module"`) 内の `location` 読み取り**は補正できません。モジュールは `with` で包めない (構文エラーになる) ため、モジュールだけで書かれた SPA ルーターは現在パスを誤認することがあります。ページ移動そのもの (`location.href =`、`assign` / `replace`、`pushState` など) はモジュールでも書き換わります
-- Service Worker は無効にしています (単一オリジンのプロキシでは、サイトごとにスコープを分けて安全に動かせないため)
-- OAuth ログイン (別オリジンのポップアップやリダイレクトを伴うもの)、CAPTCHA、DRM 付きの動画は、プロキシ経由であることが検知される / 別オリジンが必要なため、動かないことがあります。これらを回避 (検知のすり抜けや保護の解除) する機能は入れていません
+| ファイル | 中身 |
+|---|---|
+| `gpt.js` | ブラウザ版のモデル (TensorFlow.js)。トークナイザ、モデル、データの切り出し、保存形式 |
+| `index.html` | ブラウザ版の画面 |
+| `colab/tiny_gpt.py` | Colab 版のモデルと学習 (PyTorch)。`gpt.js` と同じ構造 |
+| `colab/tiny_gpt.ipynb` | Colab で開くノートブック。`python colab/make_notebook.py` で `tiny_gpt.py` から作り直せます |
+| `sample.txt` | 例の文章 (このリポジトリのために書いたお話) |
 
-## セキュリティ
+## 期待しすぎないために
 
-`localhost` やプライベート IP へのアクセスは、初期状態ではブロックしています (SSRF 対策)。
-許可するには `ALLOW_PRIVATE=1` を指定します。
-認証の機能はないので、インターネットに公開するときはリバースプロキシなどでアクセスを制限してください。
+- 数千字の文章では、学習データの言い回しを丸暗記する程度です。検証の損失が上がり始めたら、それ以上は覚えるだけになっています
+- 文らしい文章を書かせるには、数十万〜数百万字の文章と、Colab の GPU で数十分の学習が目安です
+- ChatGPT のように質問に答えさせるには、さらに桁違いのデータと計算と、会話の形の追加学習が必要です。ここで作れるのは「読んだ文章に似た続きを書くモデル」です

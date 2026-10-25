@@ -1,0 +1,759 @@
+<title>ちいさなGPT工房</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* レイアウト: 左に「材料」(データと設定)、右に「作業台」(学習と生成)。狭い画面では縦一列。 */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --ink: #18212e;
+  --muted: #5b6675;
+  --line: #d5dbe3;
+  --accent: #0f7a6b;
+  --accent-ink: #ffffff;
+  --val: #b0701a;
+  --danger: #b4372f;
+  --font-display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151c; --surface: #171e27; --ink: #e6ebf1; --muted: #93a0b0; --line: #2a3442;
+    --accent: #3fbfa9; --accent-ink: #06201b; --val: #e0a64a; --danger: #f07a70;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151c; --surface: #171e27; --ink: #e6ebf1; --muted: #93a0b0; --line: #2a3442;
+  --accent: #3fbfa9; --accent-ink: #06201b; --val: #e0a64a; --danger: #f07a70;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 24px; }
+
+header { display: grid; gap: 6px; }
+h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(28px, 5vw, 40px);
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: 0.02em;
+  text-wrap: balance;
+}
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.steps {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+}
+.steps li {
+  font-size: 13px; color: var(--muted); line-height: 1.5;
+  border-top: 2px solid var(--line); padding-top: 8px;
+}
+.steps b { display: block; color: var(--ink); font-weight: 700; font-size: 14px; }
+.steps .n { font-family: var(--font-mono); color: var(--accent); margin-right: 6px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.col { display: grid; gap: 20px; min-width: 0; }
+
+section.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  display: grid; gap: 14px;
+  min-width: 0;
+}
+h2 { font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+h2 small { font-weight: 400; color: var(--muted); font-size: 13px; }
+
+textarea, input[type="text"], input[type="number"], select {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%;
+}
+textarea { min-height: 220px; resize: vertical; font-size: 14px; line-height: 1.6; }
+input[type="number"] { font-family: var(--font-mono); font-size: 14px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.meta { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px 12px; }
+.fields label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); letter-spacing: 0.02em; }
+
+.presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font: inherit; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  border-radius: 999px; padding: 4px 12px;
+}
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+.btn {
+  display: inline-block; line-height: 1.5;
+  font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  border-radius: 6px; padding: 8px 16px;
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.warn { background: transparent; color: var(--danger); border-color: var(--line); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.file-btn { position: relative; overflow: hidden; display: inline-block; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stat { display: grid; gap: 2px; }
+.stat span { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
+.stat b { font-family: var(--font-mono); font-weight: 500; font-size: 18px; font-variant-numeric: tabular-nums; }
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+
+.chart-box { position: relative; }
+canvas#chart { width: 100%; height: 220px; display: block; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+
+.output {
+  font-size: 15px; line-height: 1.85; white-space: pre-wrap; word-break: break-all;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 12px 14px; min-height: 120px; margin: 0;
+}
+.output .prompt { color: var(--muted); }
+.output.peek { min-height: 0; font-size: 14px; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.note.err { color: var(--danger); }
+.status-pill {
+  font-family: var(--font-mono); font-size: 12px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.status-pill[data-s="run"] { color: var(--accent); border-color: var(--accent); }
+.status-pill[data-s="pause"] { color: var(--val); border-color: var(--val); }
+
+details { font-size: 14px; }
+details summary { cursor: pointer; font-weight: 700; }
+details ol { margin: 8px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 460px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>ちいさなGPT工房</h1>
+    <p class="lede">文章を読ませて、自分だけの言語モデルをブラウザの中で一から育てます。サーバーには何も送りません。計算はこの端末の GPU (なければ CPU) で行います。</p>
+  </header>
+
+  <ol class="steps" aria-label="しくみ">
+    <li><b><span class="n">1</span>文字を番号に</b>出てくる文字に番号をふり、文章を数字の列にします。</li>
+    <li><b><span class="n">2</span>前の文字を読む</b>Transformer が、直前の文字たちの関係を注意 (attention) で見ます。</li>
+    <li><b><span class="n">3</span>次の文字を予想</b>次に来る文字の確率を、語彙のすべてについて出します。</li>
+    <li><b><span class="n">4</span>外れた分だけ直す</b>本当の次の文字との差 (損失) が小さくなるよう、重みを少しずつ動かします。</li>
+  </ol>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-data">
+        <h2 id="h-data">学習データ <small>例として短いお話を入れてあります</small></h2>
+        <textarea id="text" spellcheck="false" aria-label="学習に使う文章"></textarea>
+        <div class="row">
+          <span class="file-btn btn ghost" role="button">テキストファイルを開く<input id="file-text" type="file" accept=".txt,text/plain" aria-label="テキストファイルを開く"></span>
+          <button class="btn ghost" id="btn-sample" type="button">例に戻す</button>
+        </div>
+        <p class="meta" id="data-meta"></p>
+        <p class="note">文章は多いほど上手になります。数千字なら言い回しのまね、数十万字あると文らしくなってきます。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-model">
+        <h2 id="h-model">モデルの大きさ</h2>
+        <div class="presets" role="group" aria-label="おすすめ設定">
+          <button class="chip" type="button" data-preset="mini">ミニ (数分)</button>
+          <button class="chip" type="button" data-preset="small">小 (十数分)</button>
+          <button class="chip" type="button" data-preset="medium">中 (GPU 向け)</button>
+        </div>
+        <div class="fields">
+          <label>層の数<input id="nLayer" type="number" min="1" max="12"></label>
+          <label>注意ヘッド<input id="nHead" type="number" min="1" max="16"></label>
+          <label>埋め込み次元<input id="nEmbd" type="number" min="16" max="512" step="16"></label>
+          <label>文脈の長さ (字)<input id="blockSize" type="number" min="8" max="512" step="8"></label>
+          <label>バッチ<input id="batch" type="number" min="1" max="256"></label>
+          <label>学習率<input id="lr" type="number" min="0.00001" max="0.1" step="0.0001"></label>
+          <label>ステップ数<input id="steps" type="number" min="10" max="100000" step="100"></label>
+        </div>
+        <p class="meta" id="model-meta"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-save">
+        <h2 id="h-save">保存と読み込み</h2>
+        <div class="row">
+          <button class="btn ghost" id="btn-save" type="button">このブラウザに保存</button>
+          <button class="btn ghost" id="btn-load" type="button">保存したものを開く</button>
+          <button class="btn ghost" id="btn-export" type="button" hidden>JSON に書き出す</button>
+          <span class="file-btn btn ghost" role="button">JSON を読み込む<input id="file-model" type="file" accept=".json,application/json" aria-label="モデルの JSON を読み込む"></span>
+        </div>
+        <p class="note" id="save-note">「JSON を読み込む」で、Colab で学習したモデル (tiny_gpt.json) もそのまま使えます。</p>
+        <details>
+          <summary>GPU が無いときは Google Colab で大きく学習する</summary>
+          <ol>
+            <li><a href="https://colab.research.google.com/" target="_blank" rel="noopener">Google Colab</a> を開き、「ノートブックをアップロード」でリポジトリの <code>colab/tiny_gpt.ipynb</code> を選びます。</li>
+            <li>メニューの「ランタイム → ランタイムのタイプを変更」で <b>T4 GPU</b> を選びます (無料枠で使えます)。</li>
+            <li>上から順にセルを実行します。自分の文章をアップロードするセルもあります。</li>
+            <li>最後のセルで <code>tiny_gpt.json</code> がダウンロードされます。この画面の「JSON を読み込む」で開くと、ここで文章を生成できます。</li>
+          </ol>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-train">
+        <h2 id="h-train">学習 <span class="status-pill" id="status" data-s="idle">待機中</span></h2>
+        <div class="row">
+          <button class="btn" id="btn-train" type="button">学習を始める</button>
+          <button class="btn ghost" id="btn-pause" type="button" disabled>一時停止</button>
+          <button class="btn warn" id="btn-reset" type="button" disabled>モデルを作り直す</button>
+        </div>
+        <div class="bar" aria-hidden="true"><i id="progress"></i></div>
+        <div class="stats">
+          <div class="stat"><span>ステップ</span><b id="s-step">0</b></div>
+          <div class="stat"><span>学習の損失</span><b id="s-loss">–</b></div>
+          <div class="stat"><span>検証の損失</span><b id="s-val">–</b></div>
+          <div class="stat"><span>速さ</span><b id="s-speed">–</b></div>
+        </div>
+        <div class="chart-box">
+          <canvas id="chart" aria-label="損失の推移グラフ" role="img"></canvas>
+        </div>
+        <div class="legend">
+          <span><i style="background: var(--accent)"></i>学習の損失</span>
+          <span><i style="background: var(--val)"></i>検証の損失 (学習に使っていない 1 割)</span>
+          <span><i style="background: var(--line)"></i>でたらめに選んだ場合 = ln(語彙数)</span>
+        </div>
+        <p class="note">損失はクロスエントロピー (単位: nat)。下がるほど、次の文字をうまく当てています。検証の損失だけが上がり始めたら、丸暗記 (過学習) のサインです。</p>
+        <div>
+          <p class="note" style="margin-bottom:6px">途中経過の試し書き</p>
+          <pre class="output peek" id="peek">学習を始めると、ここに 200 ステップごとの試し書きが出ます。最初はでたらめな文字の並びです。</pre>
+        </div>
+        <p class="meta" id="backend"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-gen">
+        <h2 id="h-gen">文章を書かせる</h2>
+        <label class="fields" style="grid-template-columns:1fr">
+          <span style="font-size:12.5px;color:var(--muted)">書き出し</span>
+          <input id="prompt" type="text" value="ある日、" aria-label="書き出し">
+        </label>
+        <div class="fields">
+          <label>長さ (字)<input id="genLen" type="number" min="1" max="2000" value="200"></label>
+          <label>温度<input id="temp" type="number" min="0.1" max="2" step="0.1" value="0.8"></label>
+          <label>上位 k 個から<input id="topk" type="number" min="0" max="500" value="20"></label>
+        </div>
+        <div class="row">
+          <button class="btn" id="btn-gen" type="button" disabled>書かせる</button>
+          <button class="btn ghost" id="btn-stop" type="button" disabled>止める</button>
+        </div>
+        <pre class="output" id="output">モデルを学習させるか読み込むと、書き出しの続きを書きます。</pre>
+        <p class="note">温度を下げると無難に、上げると冒険的になります。「上位 k 個から」は確率の高い k 文字だけから選びます (0 は制限なし)。</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script type="text/plain" id="sample-text">山のふもとに、小さな郵便局がありました。郵便局には、ねこの局長と、きつねの配達係がいました。
+朝になると、局長は窓をあけて、山の天気を見ました。「きょうは晴れ。手紙がたくさん来るでしょう。」
+配達係のきつねは、かばんに手紙をつめて、坂道をのぼっていきました。
+最初の手紙は、うさぎの家にとどきました。うさぎは手紙を読んで、にっこりわらいました。「おばあさんが、あした来るんだって。」
+つぎの手紙は、くまの家にとどきました。くまは手紙を読んで、すこし考えました。「はちみつを、もうすこし買っておこう。」
+三つめの手紙は、川のそばのかえるの家にとどきました。かえるは手紙を読んで、ぴょんととびはねました。「雨がふるまで、あと三日だ。」
+
+ある日、郵便局に、宛名のない手紙がとどきました。
+局長は手紙をひっくりかえして、首をかしげました。「これは、だれにとどければいいのでしょう。」
+きつねは手紙のにおいをかいで、言いました。「これは、松の木のにおいがします。」
+ふたりは、山のいちばん上にある松の木まで歩いていきました。
+松の木の下には、ふくろうがすわっていました。ふくろうは手紙を見て、目をまるくしました。「それは、わたしが去年の冬に書いた手紙です。」
+「だれにあてた手紙ですか。」と局長がききました。
+「春にあてた手紙です。早く来てくださいと書いたのです。」
+局長ときつねは、顔を見あわせて、わらいました。山には、もう花がさいていたからです。
+
+夏になると、郵便局はいそがしくなりました。
+山のむこうから、海の手紙がとどくようになったのです。海の手紙は、すこししょっぱいにおいがしました。
+うさぎは海の手紙を読んで、言いました。「いつか、海を見に行きたいな。」
+くまは海の手紙を読んで、言いました。「海にも、はちみつはあるのかな。」
+かえるは海の手紙を読んで、言いました。「海の水は、雨とはちがう味がするらしい。」
+局長は、みんなの返事をあつめて、大きな箱に入れました。きつねは箱をせおって、海まで歩いていきました。
+
+秋になると、山の木の葉が赤くなりました。
+郵便局の前には、どんぐりの手紙がならびました。どんぐりの手紙は、とても小さくて、とても軽い手紙です。
+局長はめがねをかけて、ひとつずつ読みました。「ことしは、どんぐりがたくさんとれました。」「ことしは、きのこがすこししかとれませんでした。」
+きつねはどんぐりの手紙を、りすの家にとどけました。りすは手紙をよろこんで、しっぽをふりました。
+
+冬になると、山は雪でまっしろになりました。
+きつねは長いくつをはいて、雪の道を歩きました。足あとが、郵便局から山の上まで、ずっとつづきました。
+ある夜、郵便局の戸をたたく音がしました。局長が戸をあけると、そこには小さなゆきうさぎが立っていました。
+「手紙を出したいのです。でも、切手を買うお金がありません。」
+局長はすこし考えて、言いました。「では、歌をひとつ聞かせてください。それが切手のかわりです。」
+ゆきうさぎは、しずかな声で歌いました。雪がふる音のような、やさしい歌でした。
+局長は手紙に、雪のかけらをはりました。「これで、だいじょうぶ。あした、きつねがとどけます。」
+
+つぎの朝、きつねは雪のかけらをはった手紙を持って、山をおりていきました。
+手紙は、ふもとの村の女の子にとどきました。女の子は手紙を読んで、窓の外を見ました。
+窓の外では、小さなゆきうさぎが手をふっていました。
+
+春が来て、また一年がはじまりました。
+局長は窓をあけて、山の天気を見ました。「きょうは晴れ。手紙がたくさん来るでしょう。」
+配達係のきつねは、かばんに手紙をつめて、坂道をのぼっていきました。
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="gpt.js"></script>
+<script>
+(function () {
+  'use strict';
+  const { CharTokenizer, GPT, Dataset, serialize, deserialize } = window.TinyGPT;
+  const $ = id => document.getElementById(id);
+
+  const PRESETS = {
+    mini:   { nLayer: 2, nHead: 4, nEmbd: 64,  blockSize: 64,  batch: 32, lr: 0.002,  steps: 1500 },
+    small:  { nLayer: 4, nHead: 4, nEmbd: 128, blockSize: 128, batch: 32, lr: 0.001,  steps: 3000 },
+    medium: { nLayer: 6, nHead: 6, nEmbd: 192, blockSize: 128, batch: 32, lr: 0.0006, steps: 5000 },
+  };
+  const FIELDS = ['nLayer', 'nHead', 'nEmbd', 'blockSize', 'batch', 'lr', 'steps'];
+  const SAMPLE = $('sample-text').textContent;
+
+  // 学習の状態
+  const st = {
+    model: null, tokenizer: null, dataset: null, optimizer: null,
+    builtFrom: null,          // モデルを作ったときの文章 (変わったら作り直しが必要)
+    step: 0, running: false, generating: false,
+    trainHist: [], valHist: [], ema: null,
+  };
+
+  // ---------- 保存の小物 (IndexedDB。使えないブラウザもある) ----------
+  function idb(mode, fn) {
+    return new Promise((resolve, reject) => {
+      let req;
+      try { req = indexedDB.open('tiny-gpt', 1); } catch (e) { reject(e); return; }
+      req.onupgradeneeded = () => req.result.createObjectStore('models');
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const tx = req.result.transaction('models', mode);
+        const r = fn(tx.objectStore('models'));
+        tx.oncomplete = () => resolve(r && r.result);
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }
+
+  // ---------- 表示 ----------
+  function readCfg() {
+    const v = {};
+    for (const f of FIELDS) v[f] = Number($(f).value);
+    return v;
+  }
+  function writeCfg(c) {
+    for (const f of FIELDS) if (c[f] !== undefined) $(f).value = c[f];
+    markPreset();
+    updateMeta();
+  }
+  function markPreset() {
+    const c = readCfg();
+    document.querySelectorAll('[data-preset]').forEach(b => {
+      const p = PRESETS[b.dataset.preset];
+      b.setAttribute('aria-pressed', String(FIELDS.every(f => p[f] === c[f])));
+    });
+  }
+  function countParams(V, c) {
+    const C = c.nEmbd;
+    return 2 * V * C + c.blockSize * C + c.nLayer * (12 * C * C + 13 * C) + 2 * C;
+  }
+  function fmt(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(n);
+  }
+  function updateMeta() {
+    const text = $('text').value;
+    const chars = Array.from(text);
+    const V = new Set(chars).size;
+    $('data-meta').textContent = `${chars.length.toLocaleString()} 字 / 語彙 ${V.toLocaleString()} 種類`;
+    const c = readCfg();
+    let msg = `パラメータ 約 ${fmt(countParams(V, c))} 個`;
+    if (c.nEmbd % c.nHead !== 0) msg += ' — 埋め込み次元をヘッド数で割り切れる数にしてください';
+    if (st.model && !st.running && st.builtFrom !== null && st.builtFrom !== text) {
+      msg += ' — 文章が変わりました。このまま続けると、今の語彙のまま新しい文章で学習します (語彙にない文字は飛ばします)。語彙から作り直すときは「モデルを作り直す」';
+    }
+    $('model-meta').textContent = msg;
+  }
+  function setStatus(s, label) {
+    const el = $('status');
+    el.dataset.s = s;
+    el.textContent = label;
+  }
+  function refreshButtons() {
+    const busy = st.running || st.generating;
+    $('btn-train').disabled = busy;
+    $('btn-train').textContent = st.model && st.step > 0 ? '学習を続ける' : '学習を始める';
+    $('btn-pause').disabled = !st.running;
+    $('btn-reset').disabled = busy || !st.model;
+    $('btn-gen').disabled = busy || !st.model;
+    $('btn-stop').disabled = !st.generating;
+    $('btn-save').disabled = busy || !st.model;
+    $('btn-export').disabled = busy || !st.model;
+    for (const f of FIELDS) $(f).disabled = !!st.model && !['lr', 'steps', 'batch'].includes(f);
+  }
+
+  // ---------- グラフ ----------
+  function drawChart() {
+    const cv = $('chart'), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (!w) return;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const css = getComputedStyle(document.documentElement);
+    const col = n => css.getPropertyValue(n).trim();
+    g.clearRect(0, 0, w, h);
+
+    const pad = { l: 40, r: 10, t: 10, b: 22 };
+    const V = st.tokenizer ? st.tokenizer.size : new Set(Array.from($('text').value)).size;
+    const base = Math.log(Math.max(V, 2));
+    const total = Math.max(readCfg().steps, st.step, 10);
+    const yMax = Math.ceil(Math.max(base, ...st.trainHist.map(p => p[1]), ...st.valHist.map(p => p[1])) + 0.2);
+    const X = s => pad.l + (s / total) * (w - pad.l - pad.r);
+    const Y = v => pad.t + (1 - v / yMax) * (h - pad.t - pad.b);
+
+    g.font = '11px "IBM Plex Mono", monospace';
+    g.fillStyle = col('--muted');
+    g.strokeStyle = col('--line');
+    g.lineWidth = 1;
+    const yStep = yMax > 6 ? 2 : 1;
+    for (let v = 0; v <= yMax; v += yStep) {
+      g.beginPath(); g.moveTo(pad.l, Y(v)); g.lineTo(w - pad.r, Y(v)); g.globalAlpha = 0.6; g.stroke(); g.globalAlpha = 1;
+      g.textAlign = 'right'; g.textBaseline = 'middle'; g.fillText(v.toFixed(0), pad.l - 6, Y(v));
+    }
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.fillText('0', pad.l, h - 6);
+    g.textAlign = 'right';
+    g.fillText(total.toLocaleString() + ' step', w - pad.r, h - 6);
+
+    // でたらめに選んだ場合の基準線
+    g.setLineDash([4, 4]); g.strokeStyle = col('--muted'); g.globalAlpha = 0.5;
+    g.beginPath(); g.moveTo(pad.l, Y(base)); g.lineTo(w - pad.r, Y(base)); g.stroke();
+    g.setLineDash([]); g.globalAlpha = 1;
+
+    const line = (pts, color, width) => {
+      if (pts.length < 2) return;
+      g.strokeStyle = color; g.lineWidth = width; g.beginPath();
+      pts.forEach(([s, v], i) => (i ? g.lineTo(X(s), Y(v)) : g.moveTo(X(s), Y(v))));
+      g.stroke();
+    };
+    line(st.trainHist, col('--accent'), 2);
+    line(st.valHist, col('--val'), 2);
+    g.fillStyle = col('--val');
+    for (const [s, v] of st.valHist) { g.beginPath(); g.arc(X(s), Y(v), 2.5, 0, Math.PI * 2); g.fill(); }
+    const last = st.trainHist[st.trainHist.length - 1];
+    if (last) { g.fillStyle = col('--accent'); g.beginPath(); g.arc(X(last[0]), Y(last[1]), 3.5, 0, Math.PI * 2); g.fill(); }
+  }
+
+  // ---------- モデルづくり ----------
+  function buildModel() {
+    const text = $('text').value;
+    const c = readCfg();
+    if (Array.from(text).length < 50) throw new Error('文章が短すぎます。50 字以上入れてください。');
+    if (c.nEmbd % c.nHead !== 0) throw new Error('埋め込み次元をヘッド数で割り切れる数にしてください。');
+    const tokenizer = CharTokenizer.fromText(text);
+    const ids = tokenizer.encode(text);
+    const blockSize = Math.min(c.blockSize, ids.length - 2);
+    disposeModel();
+    st.tokenizer = tokenizer;
+    st.model = new GPT({ vocabSize: tokenizer.size, nLayer: c.nLayer, nHead: c.nHead, nEmbd: c.nEmbd, blockSize });
+    st.dataset = new Dataset(ids, blockSize);
+    st.builtFrom = text;
+    st.step = 0; st.trainHist = []; st.valHist = []; st.ema = null;
+  }
+  function disposeModel() {
+    if (st.model) st.model.dispose();
+    if (st.optimizer) st.optimizer.dispose();
+    st.model = st.optimizer = st.dataset = null;
+  }
+  function ensureDataset() {
+    // 読み込んだモデルで学習を続けるときは、そのモデルの語彙で今の文章を数字にする
+    const text = $('text').value;
+    if (st.dataset && st.builtFrom === text) return;
+    const ids = st.tokenizer.encode(text);
+    if (ids.length < st.model.cfg.blockSize + 2) throw new Error('このモデルの語彙で読める文字が少なすぎます。文章を増やすか、モデルを作り直してください。');
+    st.dataset = new Dataset(ids, st.model.cfg.blockSize);
+    st.builtFrom = text;
+  }
+
+  // 勾配を全体のノルムで切りそろえてから 1 歩進める
+  function trainStep(B) {
+    return tf.tidy(() => {
+      const { x, y } = st.dataset.batch('train', B);
+      const { value, grads } = tf.variableGrads(() => st.model.loss(x, y), Object.values(st.model.params));
+      const norm = tf.sqrt(tf.addN(Object.values(grads).map(g => g.square().sum())));
+      const scale = tf.minimum(1, tf.div(1, norm.add(1e-6)));
+      const clipped = {};
+      for (const [k, g] of Object.entries(grads)) clipped[k] = g.mul(scale);
+      st.optimizer.applyGradients(clipped);
+      return value;
+    });
+  }
+  async function evalVal(B) {
+    const t = tf.tidy(() => {
+      const { x, y } = st.dataset.batch('val', B);
+      return st.model.loss(x, y);
+    });
+    const v = (await t.data())[0];
+    t.dispose();
+    return v;
+  }
+
+  async function sampleText(promptIds, n, opts, onChar) {
+    const ids = promptIds.slice();
+    for (let i = 0; i < n; i++) {
+      if (opts.shouldStop && opts.shouldStop()) break;
+      const next = await st.model.sampleNext(ids, opts);
+      ids.push(next);
+      if (onChar) onChar(st.tokenizer.chars[next]);
+      if (i % 4 === 3) await tf.nextFrame();
+    }
+    return st.tokenizer.decode(ids.slice(promptIds.length));
+  }
+
+  async function train() {
+    try {
+      if (!st.model) buildModel();
+      else ensureDataset();
+    } catch (e) {
+      $('model-meta').textContent = e.message;
+      return;
+    }
+    const c = readCfg();
+    st.optimizer = st.optimizer || tf.train.adam(c.lr, 0.9, 0.99);
+    st.running = true;
+    refreshButtons();
+    setStatus('run', '学習中');
+    updateMeta();
+
+    const total = Math.max(c.steps, st.step + 1);
+    const warmup = Math.max(1, Math.floor(total / 20));
+    const t0 = performance.now(), s0 = st.step;
+    try {
+      while (st.running && st.step < total) {
+        // 最初は徐々に上げ、あとはコサインで下げる
+        const s = st.step;
+        const scale = s < warmup ? (s + 1) / warmup : 0.5 * (1 + Math.cos(Math.PI * (s - warmup) / Math.max(1, total - warmup)));
+        st.optimizer.learningRate = c.lr * Math.max(scale, 0.1);
+
+        const lossT = trainStep(c.batch);
+        const loss = (await lossT.data())[0];
+        lossT.dispose();
+        if (!Number.isFinite(loss)) throw new Error('損失が発散しました。学習率を下げて作り直してください。');
+        st.step++;
+        st.ema = st.ema === null ? loss : 0.95 * st.ema + 0.05 * loss;
+        if (st.step % 5 === 0 || st.step === 1) st.trainHist.push([st.step, st.ema]);
+
+        if (st.step % 50 === 0 || st.step === total) {
+          const v = (await evalVal(c.batch) + await evalVal(c.batch)) / 2;
+          st.valHist.push([st.step, v]);
+          $('s-val').textContent = v.toFixed(3);
+        }
+        if (st.step % 200 === 0 || st.step === total) {
+          const start = st.tokenizer.encode('\n');
+          const peek = await sampleText(start.length ? start : [0], 80, { temperature: 0.8, topK: 20 });
+          $('peek').textContent = `step ${st.step}:\n${peek.trim()}`;
+        }
+        $('s-step').textContent = st.step.toLocaleString();
+        $('s-loss').textContent = st.ema.toFixed(3);
+        $('progress').style.width = (100 * st.step / total).toFixed(1) + '%';
+        // 試し書きや検証の時間も含めた、この回の平均
+        const rate = (st.step - s0) / ((performance.now() - t0) / 1000);
+        $('s-speed').textContent = (rate >= 10 ? rate.toFixed(0) : rate.toFixed(2)) + '/s';
+        if (st.step % 5 === 0) { drawChart(); await tf.nextFrame(); }
+      }
+      setStatus(st.step >= total ? 'idle' : 'pause', st.step >= total ? '完了' : '一時停止');
+    } catch (e) {
+      setStatus('idle', 'エラー');
+      $('model-meta').textContent = e.message;
+    }
+    st.running = false;
+    drawChart();
+    refreshButtons();
+    updateMeta();
+  }
+
+  async function generate() {
+    const promptText = $('prompt').value;
+    let ids = st.tokenizer.encode(promptText);
+    const known = st.tokenizer.decode(ids);
+    if (!ids.length) ids = st.tokenizer.encode('\n').length ? st.tokenizer.encode('\n') : [0];
+    const out = $('output');
+    out.textContent = '';
+    const head = document.createElement('span');
+    head.className = 'prompt';
+    head.textContent = known;
+    const body = document.createTextNode('');
+    out.append(head, body);
+    st.generating = true;
+    refreshButtons();
+    try {
+      await sampleText(ids, Math.max(1, Number($('genLen').value) || 200), {
+        temperature: Number($('temp').value) || 0.8,
+        topK: Math.max(0, Number($('topk').value) || 0),
+        shouldStop: () => !st.generating,
+      }, ch => { body.textContent += ch; });
+      if (known.length < Array.from(promptText).length) {
+        const n = document.createElement('p');
+        n.className = 'note';
+        n.textContent = '書き出しのうち、学習データに出てこない文字は使えないので外しました。';
+        out.after(n);
+        setTimeout(() => n.remove(), 6000);
+      }
+    } finally {
+      st.generating = false;
+      refreshButtons();
+    }
+  }
+
+  // ---------- 保存 ----------
+  function note(msg, isErr) {
+    const el = $('save-note');
+    el.textContent = msg;
+    el.classList.toggle('err', !!isErr);
+  }
+  function adoptLoaded(model, tokenizer, label) {
+    disposeModel();
+    st.model = model;
+    st.tokenizer = tokenizer;
+    st.builtFrom = null;
+    st.step = 0; st.trainHist = []; st.valHist = []; st.ema = null;
+    writeCfg({ nLayer: model.cfg.nLayer, nHead: model.cfg.nHead, nEmbd: model.cfg.nEmbd, blockSize: model.cfg.blockSize });
+    $('s-step').textContent = '0'; $('s-loss').textContent = '–'; $('s-val').textContent = '–'; $('s-speed').textContent = '–';
+    $('progress').style.width = '0';
+    setStatus('idle', '読み込み済み');
+    note(`${label}を開きました (語彙 ${tokenizer.size.toLocaleString()} / パラメータ ${fmt(model.numParams)})。`);
+    drawChart();
+    refreshButtons();
+  }
+
+  $('btn-save').onclick = async () => {
+    try {
+      const data = serialize(st.model, st.tokenizer);
+      data.savedAt = new Date().toISOString();
+      await idb('readwrite', s => s.put(data, 'latest'));
+      note('このブラウザに保存しました。次に開いたときも「保存したものを開く」で戻せます。');
+    } catch (e) {
+      note('このブラウザでは保存できませんでした (プライベートモードなど)。', true);
+    }
+  };
+  $('btn-load').onclick = async () => {
+    try {
+      const data = await idb('readonly', s => s.get('latest'));
+      if (!data) { note('まだ保存したモデルがありません。', true); return; }
+      const { model, tokenizer } = deserialize(data);
+      adoptLoaded(model, tokenizer, `${new Date(data.savedAt).toLocaleString()} に保存したモデル`);
+    } catch (e) {
+      note('保存したモデルを開けませんでした: ' + e.message, true);
+    }
+  };
+  $('file-model').onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const { model, tokenizer } = deserialize(JSON.parse(r.result));
+        adoptLoaded(model, tokenizer, f.name);
+      } catch (err) {
+        note('JSON を読み込めませんでした: ' + err.message, true);
+      }
+    };
+    r.readAsText(f);
+    e.target.value = '';
+  };
+  // 埋め込み表示 (iframe) の中ではダウンロードが使えないので、直接開いたときだけ出す
+  if (window.self === window.top) {
+    $('btn-export').hidden = false;
+    $('btn-export').onclick = () => {
+      const blob = new Blob([JSON.stringify(serialize(st.model, st.tokenizer))], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'tiny_gpt.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+  }
+
+  // ---------- 操作 ----------
+  $('btn-train').onclick = train;
+  $('btn-pause').onclick = () => { st.running = false; };
+  $('btn-reset').onclick = () => {
+    disposeModel();
+    st.tokenizer = null; st.builtFrom = null;
+    st.step = 0; st.trainHist = []; st.valHist = []; st.ema = null;
+    $('s-step').textContent = '0'; $('s-loss').textContent = '–'; $('s-val').textContent = '–'; $('s-speed').textContent = '–';
+    $('progress').style.width = '0';
+    $('peek').textContent = '学習を始めると、ここに 200 ステップごとの試し書きが出ます。';
+    setStatus('idle', '待機中');
+    drawChart();
+    refreshButtons();
+    updateMeta();
+  };
+  $('btn-gen').onclick = generate;
+  $('btn-stop').onclick = () => { st.generating = false; };
+  $('btn-sample').onclick = () => { $('text').value = SAMPLE; updateMeta(); drawChart(); };
+  $('text').addEventListener('input', () => { updateMeta(); if (!st.model) drawChart(); });
+  $('file-text').onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { $('text').value = r.result; updateMeta(); if (!st.model) drawChart(); };
+    r.readAsText(f, 'utf-8');
+    e.target.value = '';
+  };
+  document.querySelectorAll('[data-preset]').forEach(b => {
+    b.onclick = () => {
+      const p = PRESETS[b.dataset.preset];
+      writeCfg(st.model ? { batch: p.batch, lr: p.lr, steps: p.steps } : p);
+      drawChart();
+    };
+  });
+  FIELDS.forEach(f => $(f).addEventListener('input', () => { markPreset(); updateMeta(); drawChart(); }));
+  window.addEventListener('resize', drawChart);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart);
+  new MutationObserver(drawChart).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ---------- はじめ ----------
+  $('text').value = SAMPLE;
+  writeCfg(PRESETS.mini);
+  refreshButtons();
+  drawChart();
+  tf.ready().then(() => {
+    const b = tf.getBackend();
+    $('backend').textContent = `計算エンジン: ${b === 'webgl' ? 'GPU (WebGL)' : b === 'webgpu' ? 'GPU (WebGPU)' : 'CPU'} / TensorFlow.js ${tf.version.tfjs}`;
+  });
+  window.__tinyGptApp = st; // 動作確認用
+})();
+</script>

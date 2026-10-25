@@ -1,5 +1,4 @@
-node_modules/
 .DS_Store
+__pycache__/
 *.log
-.px-sessions.json
-.px-sessions.json.*
+tiny_gpt.json
