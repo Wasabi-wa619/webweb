@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マイAI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" hidden>
+  <form id="login-form">
+    <h1>マイAI</h1>
+    <input id="password" type="password" placeholder="パスワード" autocomplete="current-password" required>
+    <button>ログイン</button>
+    <p id="login-error" class="error"></p>
+  </form>
+</div>
+<div id="app" hidden>
+  <header>
+    <h1>マイAI</h1>
+    <select id="role" title="どのAIの組み合わせで答えるか"></select>
+    <button id="reset" type="button" title="会話を最初からやり直す">新しい会話</button>
+  </header>
+  <main id="log"></main>
+  <form id="composer">
+    <textarea id="input" rows="2" placeholder="話しかけてね (Ctrl+Enter で送信)"></textarea>
+    <button id="send">送信</button>
+    <button id="stop" type="button" hidden>止める</button>
+  </form>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "providers": {
+    "gemini": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    },
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnv": "GROQ_API_KEY"
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434/v1"
+    }
+  },
+  "roles": {
+    "main": [
+      "gemini:gemini-2.5-flash",
+      "groq:openai/gpt-oss-120b",
+      "openrouter:openrouter/free",
+      "ollama:qwen3:1.7b"
+    ],
+    "coder": [
+      "groq:openai/gpt-oss-120b",
+      "gemini:gemini-2.5-flash",
+      "openrouter:openrouter/free",
+      "ollama:qwen3:1.7b"
+    ],
+    "fast": [
+      "groq:openai/gpt-oss-20b",
+      "gemini:gemini-2.5-flash-lite",
+      "ollama:qwen3:1.7b"
+    ]
+  },
+  "maxSteps": 25
+}

@@ -1,5 +1,7 @@
 # webweb
 
+> 無料の AI で動く自分専用アシスタント (会話・検索・コーディング・Chrome 操作) は [`assistant/`](assistant/README.md) にあります。
+
 JavaScript に対応した Web プロキシです。Node.js だけで動き、依存パッケージはありません。
 
 ```sh
