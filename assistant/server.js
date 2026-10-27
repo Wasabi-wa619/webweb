@@ -46,6 +46,25 @@ async function availableRoles() {
   return roles;
 }
 
+// API キーを登録する場所 (画面の案内に出す)
+function secretsHelp() {
+  if (process.env.CODESPACES === 'true') {
+    return {
+      url: 'https://github.com/settings/codespaces',
+      where: 'GitHub の Codespaces 設定の「Secrets」→「New secret」',
+      after: '登録したら、リポジトリへのアクセスを許可し、Codespace を停止して開き直してください',
+    };
+  }
+  if (process.env.SPACE_ID) {
+    return {
+      url: `https://huggingface.co/spaces/${process.env.SPACE_ID}/settings`,
+      where: 'Space の設定ページの「New secret」',
+      after: '登録すると再起動するので、終わったら読み込み直してください',
+    };
+  }
+  return { url: null, where: '環境変数', after: '設定したら、サーバーを起動し直してください' };
+}
+
 function safeEqual(a, b) {
   const x = Buffer.from(String(a));
   const y = Buffer.from(String(b));
@@ -124,7 +143,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/state' && req.method === 'GET') {
       const roles = await availableRoles();
       const keys = Object.values(config.providers).filter((p) => p.apiKeyEnv).map((p) => p.apiKeyEnv);
-      return sendJson(res, 200, { history: conversation.display(), roles, keys, spaceId: process.env.SPACE_ID || null, busy: Boolean(running) });
+      return sendJson(res, 200, { history: conversation.display(), roles, keys, secrets: secretsHelp(), busy: Boolean(running) });
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
     if (url.pathname === '/api/stop' && req.method === 'POST') {
@@ -153,6 +172,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, async () => {
   console.log(`assistant: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/`);
   if (SETUP_REQUIRED) console.log('APP_PASSWORD が未設定です。Space の Settings → Secrets で設定してください。');
+  else if (!PASSWORD && process.env.CODESPACES === 'true') console.log('「ポート」タブの 7860 (マイAI) から開けます (自分の GitHub アカウントでのみ)。');
   else if (!PASSWORD) console.log('APP_PASSWORD が未設定なので、このマシンからだけ接続できます。');
   for (const [name, ok] of Object.entries(await availableRoles())) {
     console.log(`  ${name}: ${ok.length ? ok.join(' → ') : '(使えるAIなし: APIキーを設定してください)'}`);

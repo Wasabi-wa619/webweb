@@ -1,0 +1,29 @@
+{
+  "name": "マイAI",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "containerEnv": { "TZ": "Asia/Tokyo" },
+  "postCreateCommand": "cd assistant && npm install && npx playwright install --with-deps chromium",
+  "postStartCommand": "nohup bash -c 'cd assistant && npm start' > /tmp/assistant.log 2>&1 &",
+  "forwardPorts": [7860],
+  "portsAttributes": {
+    "7860": { "label": "マイAI", "onAutoForward": "openBrowser" }
+  },
+  "secrets": {
+    "ANTHROPIC_API_KEY": {
+      "description": "Claude のキー (有料。使う間だけ入れる。空でも可)",
+      "documentationUrl": "https://console.anthropic.com/settings/keys"
+    },
+    "GEMINI_API_KEY": {
+      "description": "Google Gemini の無料キー",
+      "documentationUrl": "https://aistudio.google.com/apikey"
+    },
+    "GROQ_API_KEY": {
+      "description": "Groq の無料キー (空でも可)",
+      "documentationUrl": "https://console.groq.com/keys"
+    },
+    "OPENROUTER_API_KEY": {
+      "description": "OpenRouter の無料キー (空でも可)",
+      "documentationUrl": "https://openrouter.ai/keys"
+    }
+  }
+}

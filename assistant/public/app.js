@@ -111,13 +111,13 @@ function showNoAi(state) {
   const banner = $('no-ai');
   banner.hidden = state.roles.main?.length > 0;
   if (banner.hidden) return;
-  const url = settingsUrl(state.spaceId);
-  const where = url ? `<a href="${url}" target="_blank" rel="noopener">Space の設定ページ</a>の「New secret」` : '環境変数';
+  const { url, where: whereText, after } = state.secrets;
+  const where = url ? `<a href="${url}" target="_blank" rel="noopener">${whereText}</a>` : whereText;
   const items = state.keys.map((k) => {
     const [label, page] = KEY_PAGES[k] || [k, null];
     return `<li>${page ? `<a href="${page}" target="_blank" rel="noopener">${label}</a>` : label} → Name: <code>${k}</code></li>`;
   }).join('');
-  banner.innerHTML = `<b>AI のキーがまだありません。</b>どれか 1 つ取ってきて、${where}に登録してください (登録後は再起動を待ってから読み込み直し)。<ol>${items}</ol>`;
+  banner.innerHTML = `<b>AI のキーがまだありません。</b>どれか 1 つ取ってきて、${where}に登録してください。${after}。<ol>${items}</ol>`;
 }
 
 async function loadState() {

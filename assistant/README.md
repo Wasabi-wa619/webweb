@@ -1,6 +1,6 @@
 # マイAI (assistant)
 
-自分専用の AI アシスタントです。クラウド (Hugging Face Spaces の無料枠) で動き、Chromebook のブラウザから使います。
+自分専用の AI アシスタントです。クラウド (GitHub Codespaces の無料枠) で動き、Chromebook のブラウザから使います。
 
 - **キャラクター付きの会話**: 性格や話し方を自由に決められます。覚えておいてほしいことは、AI が長期記憶に書き足します
 - **ネット検索**: 検索してページを読み、出典つきで答えます (検索に API キーは不要)
@@ -10,60 +10,44 @@
 
 > 操作するのはクラウド上にある別の Chrome です。Chromebook そのものや、Chromebook で開いている Chrome は操作しません。
 
-## はじめかた (10 分)
+## はじめかた (無料・5 分)
 
-### 1. Space を作る
+GitHub Codespaces (GitHub が用意してくれるクラウドのパソコン) で動かします。無料のアカウントで、月に約 60 時間まで無料です。クレジットカードは要りません。無料分を使い切ると止まるだけで、勝手に課金されることはありません。
 
-1. https://huggingface.co で無料アカウントを作ってログインします
-2. https://huggingface.co/new-space を開き、次のように選んで「Create Space」を押します
-   - **Space name**: 好きな名前 (例: `my-ai`)
-   - **Select the Space SDK**: **Docker** →「Blank」
-   - **Space hardware**: CPU basic (無料)
-   - **Private** を選ぶ
+1. GitHub にログインした状態で、次のリンクを開きます
+   **https://codespaces.new/Wasabi-wa619/webweb/tree/claude/busy-gates-q72fde?quickstart=1**
+2. 「Create new codespace」を押します。おすすめのシークレット (API キー) を入れる欄が出るので、持っているキーを入れます。空のままでも構いません
+   - `GEMINI_API_KEY`: Gemini の無料キー (https://aistudio.google.com/apikey)
+   - `ANTHROPIC_API_KEY`: Claude のキー (有料。下を参照)
+3. 初回は準備に 3〜5 分かかります。終わるとチャット画面が新しいタブで開きます。開かないときは、下の「ポート」タブの `7860` (マイAI) の地球儀マークを押します
 
-### 2. ファイルを 1 つだけ作る
+2 回目からは、同じリンク (または https://github.com/codespaces) を開くと、前回の Codespace の続きから始まります。会話の履歴や長期記憶もそのまま残っています。
 
-1. できた Space の「Files」タブ →「+ Add file」→「Create a new file」を押します
-2. ファイル名に `Dockerfile` と入れます
-3. 中身に、[`hf-space/Dockerfile`](hf-space/Dockerfile) の内容をまるごとコピーして貼り付けます (GitHub で開いて、右上のコピーボタンを押すと楽です)
-4. 下の「Commit new file to main」を押します
+知っておくこと:
 
-これで、プログラム本体は GitHub から自動で取ってきます。
-
-### 3. パスワードと AI のキーを登録する
-
-Space の「Settings」→「Variables and secrets」→「New secret」で、次を登録します。
-
-| Name | Value |
-| --- | --- |
-| `APP_PASSWORD` | チャット画面に入るためのパスワード (自分で決める) |
-| `ANTHROPIC_API_KEY` | Claude のキー (使う間だけ。下を参照) |
-| `GEMINI_API_KEY` | Gemini の無料キー (https://aistudio.google.com/apikey) |
-
-AI のキーはどれか 1 つあれば動きます。Groq (`GROQ_API_KEY`, https://console.groq.com/keys) や OpenRouter (`OPENROUTER_API_KEY`, https://openrouter.ai/keys) の無料キーも足せます。
-
-### 4. 開く
-
-ビルドが終わると (初回は 5〜10 分)、`https://<ユーザー名>-my-ai.hf.space` で開けます。パスワードでログインすれば使えます。
-
-忘れていた設定は画面が教えてくれます。パスワードがないときは登録のしかた、AI のキーがないときはキーの取り先が出ます。
+- 30 分操作がないと、Codespace は自動で止まります (無料の時間を節約するため)。https://github.com/settings/codespaces の「Default idle timeout」で最大 240 分まで延ばせます
+- チャット画面の URL は、自分の GitHub アカウントでログインしているときだけ開けます。パスワードの設定は要りません
+- キーを後から足すときは、https://github.com/settings/codespaces の「Secrets」→「New secret」で登録し、「Repository access」で `Wasabi-wa619/webweb` を選びます。そのあと Codespace を停止して開き直します
+- 使った時間は https://github.com/settings/billing で確認できます
 
 ## Claude を使う (しばらくの間)
 
 `ANTHROPIC_API_KEY` を登録している間は、Claude (`claude-opus-5-5`) がいちばん先に答えます。
 
 - キーは https://console.anthropic.com/settings/keys で作ります。**Claude の API は有料**です。使った分だけ課金されます (入力 100 万トークンあたり $4、出力 $20)。Console の「Billing」で上限額を決めておくと安心です
-- やめるときは、Secrets から `ANTHROPIC_API_KEY` を消すだけです。自動で無料の AI に切り替わります。残高がなくなったときや回数制限のときも、次の AI に切り替わります
+- やめるときは、https://github.com/settings/codespaces の「Secrets」から `ANTHROPIC_API_KEY` を消して、Codespace を開き直すだけです。自動で無料の AI に切り替わります。残高がなくなったときや回数制限のときも、次の AI に切り替わります
 - 安くしたいときは、`config.json` で `claude-opus-5-5` を `claude-sonnet-5-5` (約半額) や `claude-haiku-5-5` (さらに安い) に変えられます
 - Claude が回答を断ったときは、まずサーバー側で別の Claude モデルに回し (`fallbacks: "default"`)、それでもだめなら次の AI に回します
 
 ## キャラクターを変える
 
-Space の「Settings」→「Variables and secrets」→「New variable」で、Name を `CHARACTER`、Value にキャラクター設定を書きます (例は [`character.md`](character.md))。保存すると再起動し、画面右上の「新しい会話」から反映されます。
+Codespace の画面 (エディター) の左のファイル一覧で `assistant/character.md` を開き、書き換えて保存します。チャット画面右上の「新しい会話」から反映されます。
+
+環境変数 `CHARACTER` にキャラクター設定を入れた場合は、そちらが優先されます。
 
 ## 設定を変える (使う AI の順番など)
 
-[`config.example.json`](config.example.json) の中身をコピーして書き換え、Space の Secrets に `CONFIG_JSON` として登録します。
+Codespace のエディターで `assistant/config.example.json` を右クリック →「コピー」→「貼り付け」し、できたファイルの名前を `config.json` に変えて書き換えます。反映するには、ターミナルで `pkill -f "node server.js"; cd /workspaces/webweb/assistant && npm start` を実行します (環境変数 `CONFIG_JSON` に中身を入れても構いません)。
 
 - `providers`: AI の接続先です。OpenAI 互換の API ならなんでも足せます (`baseUrl` とキーの名前 `apiKeyEnv`)。`"type": "anthropic"` は Claude です
 - `roles`: 「`接続先:モデル名`」を並べた AI の組み合わせです。前から順に試し、失敗 (回数制限・エラー・つながらない) したら次に回します
@@ -74,18 +58,17 @@ Space の「Settings」→「Variables and secrets」→「New variable」で、
 
 無料枠の回数や使えるモデルはよく変わります。動かなくなったら、ここでモデル名を書き換えてください。Gemini の無料枠で送った内容は Google のサービス改善に使われるので、秘密の情報は送らないでください。
 
-## 知っておくこと
-
-- 48 時間使わないとスリープします。開けば数十秒〜数分で起きます
-- 再起動すると、会話の履歴・長期記憶・作業フォルダは消えます。残したい好みは `CHARACTER` に書いておくと確実です
-- 新しい版に更新するときは、Space の「Settings」→「Factory rebuild」を押します
-
 ## ローカル AI (Ollama)
 
 どの AI も使えないときの最後の手段です。
 
-- **Space の中で動かす**: Space の `Dockerfile` の `ARG WITH_OLLAMA=0` を `1` に書き換えます。起動時に `qwen3:1.7b` (約 1.4GB) を取ってきます。無料の CPU なので返事はかなり遅くなります
-- **Chromebook で動かす**: 下の手順と一緒に `curl -fsSL https://ollama.com/install.sh | sh` → `ollama pull qwen3:1.7b` を実行します
+Codespace (または Chromebook の Linux) のターミナルで次を実行すると、`qwen3:1.7b` (約 1.4GB) が使えるようになります。無料の CPU なので、返事はかなり遅くなります。
+
+```sh
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve > /tmp/ollama.log 2>&1 &
+ollama pull qwen3:1.7b
+```
 
 ## Chromebook の中で動かす (クラウドを使わない場合)
 
@@ -116,7 +99,8 @@ npm start                        # http://localhost:7860
 
 | ファイル | 役割 |
 | --- | --- |
-| `hf-space/Dockerfile` | Space に置く 1 ファイル。GitHub から本体を取ってきて組み立てる |
+| `../.devcontainer/devcontainer.json` | Codespaces の設定。準備 (インストール) と、起動したらチャットを立ち上げるところまで |
+| `hf-space/Dockerfile` | Hugging Face Spaces (有料の PRO プラン) で動かす場合に Space へ置く 1 ファイル |
 | `character.md` | キャラクター設定の例 (`CHARACTER` がなければこれを使う) |
 | `config.example.json` | 使う AI と組み合わせの設定 |
 | `lib/llm.js` | AI を順に試すクライアント。回数制限にかかった AI は 1 分間休ませる |
@@ -131,5 +115,5 @@ npm start                        # http://localhost:7860
 
 ## 安全のために
 
-- AI はクラウドのコンテナの中でどんなコマンドでも実行できます。**`APP_PASSWORD` は必ず設定してください** (設定するまで画面は使えません)
+- AI はクラウドのコンテナの中でどんなコマンドでも実行できます。Codespaces では、チャット画面は自分の GitHub アカウントでしか開けません。ほかの場所でインターネットに公開するときは、**`APP_PASSWORD` を必ず設定してください**
 - 購入・送金・投稿・削除などの取り消せない操作の前には、ユーザーに確認するよう AI に指示していますが、無料のモデルは指示を守らないこともあります。大事なアカウントでのログインは AI にさせないでください
