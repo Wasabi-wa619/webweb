@@ -116,8 +116,10 @@ export async function claudeChat({ apiKey, model, messages, tools, effort, signa
       break;
     } catch (err) {
       if (signal?.aborted) throw err;
-      if (err instanceof Anthropic.RateLimitError) throw new ClaudeFailure(`HTTP 429 ${err.message}`, { rateLimited: true });
-      if (err instanceof Anthropic.APIError) throw new ClaudeFailure(`HTTP ${err.status ?? '?'} ${err.message}`);
+      const detail = err.error?.error?.message ?? err.message; // API が返した説明だけを取り出す
+      if (err instanceof Anthropic.RateLimitError) throw new ClaudeFailure(`回数制限 (HTTP 429): ${detail}`, { rateLimited: true });
+      if (err instanceof Anthropic.AuthenticationError) throw new ClaudeFailure(`API キーが正しくありません (HTTP 401): ${detail}`);
+      if (err instanceof Anthropic.APIError) throw new ClaudeFailure(`HTTP ${err.status ?? '?'}: ${detail}`);
       // ツールの引数が JSON として読めなかったときだけ、やり直す
       if (attempt >= 2) throw new ClaudeFailure(`ツールの引数が読めませんでした: ${err.message}`);
     }
