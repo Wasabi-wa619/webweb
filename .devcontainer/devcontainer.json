@@ -9,6 +9,10 @@
     "7860": { "label": "マイAI", "onAutoForward": "openBrowser" }
   },
   "secrets": {
+    "APP_PASSWORD": {
+      "description": "チャット画面のパスワード (自分で決める。空なら自動で作り、assistant/data/password.txt に保存)",
+      "documentationUrl": "https://github.com/settings/codespaces"
+    },
     "ANTHROPIC_API_KEY": {
       "description": "Claude のキー (有料。使う間だけ入れる。空でも可)",
       "documentationUrl": "https://console.anthropic.com/settings/keys"

@@ -19,14 +19,23 @@ GitHub Codespaces (GitHub が用意してくれるクラウドのパソコン) �
 2. 「Create new codespace」を押します。おすすめのシークレット (API キー) を入れる欄が出るので、持っているキーを入れます。空のままでも構いません
    - `GEMINI_API_KEY`: Gemini の無料キー (https://aistudio.google.com/apikey)
    - `ANTHROPIC_API_KEY`: Claude のキー (有料。下を参照)
+   - `APP_PASSWORD`: チャット画面のパスワード。空なら自動で作り、`assistant/data/password.txt` に保存します
 3. 初回は準備に 3〜5 分かかります。終わるとチャット画面が新しいタブで開きます。開かないときは、下の「ポート」タブの `7860` (マイAI) の地球儀マークを押します
+4. パスワードを入れてログインします。自動で作った場合は、Codespace のエディターで `assistant/data/password.txt` を開くと書いてあります
+
+### 「HTTP ERROR 401」と出たとき
+
+チャットのポートは最初「非公開 (Private)」で、GitHub が「本人か」を確かめています。ブラウザがその確認をできないと 401 になります。次の順に試してください。
+
+1. Codespace の画面の下にある「ポート」タブで、`7860` の行の地球儀マーク (ブラウザーで開く) を押して開き直す
+2. チャットを開くブラウザで、github.com にログインしているか確かめる (シークレットウィンドウや別のプロフィールでは 401 になります)
+3. それでもだめなら、「ポート」タブで `7860` の行を右クリック →「ポートの表示範囲」→「Public」にする。URL を知っている人なら誰でもログイン画面までは開けるようになるので、パスワードは推測されにくいものにしてください (自動で作ったものなら大丈夫です)
 
 2 回目からは、同じリンク (または https://github.com/codespaces) を開くと、前回の Codespace の続きから始まります。会話の履歴や長期記憶もそのまま残っています。
 
 知っておくこと:
 
 - 30 分操作がないと、Codespace は自動で止まります (無料の時間を節約するため)。https://github.com/settings/codespaces の「Default idle timeout」で最大 240 分まで延ばせます
-- チャット画面の URL は、自分の GitHub アカウントでログインしているときだけ開けます。パスワードの設定は要りません
 - キーを後から足すときは、https://github.com/settings/codespaces の「Secrets」→「New secret」で登録し、「Repository access」で `Wasabi-wa619/webweb` を選びます。そのあと Codespace を停止して開き直します
 - 使った時間は https://github.com/settings/billing で確認できます
 
@@ -115,5 +124,5 @@ npm start                        # http://localhost:7860
 
 ## 安全のために
 
-- AI はクラウドのコンテナの中でどんなコマンドでも実行できます。Codespaces では、チャット画面は自分の GitHub アカウントでしか開けません。ほかの場所でインターネットに公開するときは、**`APP_PASSWORD` を必ず設定してください**
+- AI はクラウドのコンテナの中でどんなコマンドでも実行できます。Codespaces ではパスワードが必ずかかります。ほかの場所でインターネットに公開するときは、**`APP_PASSWORD` を必ず設定してください**
 - 購入・送金・投稿・削除などの取り消せない操作の前には、ユーザーに確認するよう AI に指示していますが、無料のモデルは指示を守らないこともあります。大事なアカウントでのログインは AI にさせないでください

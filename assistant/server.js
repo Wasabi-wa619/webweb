@@ -9,8 +9,31 @@ import * as browser from './lib/browser.js';
 
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 7860);
-const PASSWORD = process.env.APP_PASSWORD || '';
 const ON_SPACES = Boolean(process.env.SPACE_ID); // Hugging Face Spaces の中で動いているか
+const ON_CODESPACES = process.env.CODESPACES === 'true';
+
+const config = loadConfig();
+const PASSWORD_FILE = path.join(config.dataDir, 'password.txt');
+
+// Codespaces ではポートを公開 (Public) にして使うので、パスワードがなければ自動で作って保存する
+function resolvePassword() {
+  if (process.env.APP_PASSWORD) return process.env.APP_PASSWORD;
+  if (!ON_CODESPACES) return '';
+  try {
+    const saved = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
+    if (saved) return saved;
+  } catch {
+    // まだない
+  }
+  const created = crypto.randomBytes(6).toString('base64url');
+  fs.writeFileSync(PASSWORD_FILE, `${created}\n`, { mode: 0o600 });
+  return created;
+}
+
+const PASSWORD = resolvePassword();
+const PASSWORD_HINT = !process.env.APP_PASSWORD && ON_CODESPACES
+  ? 'パスワードは、Codespace のエディターで assistant/data/password.txt を開くと書いてあります。'
+  : '';
 // パスワードがないときは、外から触れないよう自分のマシンだけで待ち受ける。
 // ただし Spaces では、設定の手順を画面に出すために外から見えるようにする (API は使えない)
 const SETUP_REQUIRED = !PASSWORD && ON_SPACES;
@@ -19,7 +42,6 @@ const TOKEN = PASSWORD ? crypto.createHmac('sha256', PASSWORD).update('webweb-as
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
 
-const config = loadConfig();
 const conversation = new Conversation(config);
 let running = null; // 実行中の { controller }
 
@@ -133,6 +155,7 @@ const server = http.createServer(async (req, res) => {
     if (SETUP_REQUIRED && url.pathname.startsWith('/api/')) {
       return sendJson(res, 503, { setup: 'password', spaceId: process.env.SPACE_ID });
     }
+    if (url.pathname === '/api/hint' && req.method === 'GET') return sendJson(res, 200, { hint: PASSWORD_HINT });
     if (url.pathname === '/api/login' && req.method === 'POST') {
       const { password } = await readJson(req);
       if (PASSWORD && !safeEqual(password ?? '', PASSWORD)) return sendJson(res, 401, { error: 'パスワードが違います' });
@@ -172,7 +195,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, async () => {
   console.log(`assistant: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/`);
   if (SETUP_REQUIRED) console.log('APP_PASSWORD が未設定です。Space の Settings → Secrets で設定してください。');
-  else if (!PASSWORD && process.env.CODESPACES === 'true') console.log('「ポート」タブの 7860 (マイAI) から開けます (自分の GitHub アカウントでのみ)。');
+  if (PASSWORD_HINT) console.log(`パスワード: ${PASSWORD}  (${PASSWORD_FILE} に保存しています)`);
   else if (!PASSWORD) console.log('APP_PASSWORD が未設定なので、このマシンからだけ接続できます。');
   for (const [name, ok] of Object.entries(await availableRoles())) {
     console.log(`  ${name}: ${ok.length ? ok.join(' → ') : '(使えるAIなし: APIキーを設定してください)'}`);

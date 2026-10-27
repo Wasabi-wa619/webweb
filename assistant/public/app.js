@@ -147,9 +147,11 @@ async function loadState() {
   if (!state.history.length) addMessage('ai', 'やっほー！ 話しかけてくれたら、雑談でも調べものでもコーディングでも手伝うよ。');
 }
 
-function showLogin() {
+async function showLogin() {
   $('app').hidden = true;
   $('login').hidden = false;
+  const { hint } = await fetch('/api/hint').then((r) => r.json(), () => ({}));
+  $('login-hint').textContent = hint || '';
   $('password').focus();
 }
 
