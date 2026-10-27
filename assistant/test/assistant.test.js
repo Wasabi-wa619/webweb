@@ -7,6 +7,8 @@ import { chat, parseEntry, usableEntries, resetCooldowns } from '../lib/llm.js';
 import { parseDuckDuckGo, htmlToText } from '../lib/web.js';
 import { resolveInWorkspace, validateArgs, runTool } from '../lib/tools.js';
 import { Conversation, recentHistory } from '../lib/agent.js';
+import Anthropic from '@anthropic-ai/sdk';
+import { toClaudeMessages, fromClaudeMessage, toolId } from '../lib/claude.js';
 
 let tmp;
 let config;
@@ -143,8 +145,121 @@ test('recentHistory never starts in the middle of a tool exchange', () => {
     { role: 'user', content: '2' },
     { role: 'assistant', content: 'b' },
   ];
-  assert.deepEqual(recentHistory(msgs, 4).map((m) => m.content), ['2', 'b']);
+  assert.deepEqual(recentHistory(msgs, 4, 1).map((m) => m.content), ['2', 'b']);
   assert.equal(recentHistory(msgs, 10).length, 6);
+});
+
+test('recentHistory drops old messages in fixed steps so the prefix stays stable', () => {
+  const msgs = Array.from({ length: 90 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: String(i) }));
+  assert.equal(recentHistory(msgs.slice(0, 70), 60, 20)[0].content, '20');
+  assert.equal(recentHistory(msgs.slice(0, 61), 60, 20)[0].content, '20');
+  assert.equal(recentHistory(msgs.slice(0, 81), 60, 20)[0].content, '40');
+});
+
+function fakeClaude(responses, seen = []) {
+  return {
+    seen,
+    beta: {
+      messages: {
+        stream(params) {
+          seen.push(structuredClone(params));
+          const next = responses.shift();
+          return { finalMessage: async () => { if (next instanceof Error) throw next; return next; } };
+        },
+      },
+    },
+  };
+}
+
+test('toClaudeMessages converts history, merges tool results and replays Claude content verbatim', () => {
+  const claudeContent = [{ type: 'thinking', thinking: '', signature: 'sig' }, { type: 'text', text: 'やあ' }];
+  const out = toClaudeMessages([
+    { role: 'user', content: 'こんにちは' },
+    { role: 'assistant', content: 'やあ', _claude: claudeContent },
+    { role: 'user', content: '調べて' },
+    { role: 'assistant', content: '', tool_calls: [
+      { id: 'call:1', type: 'function', function: { name: 'web_search', arguments: '{"query":"x"}' } },
+      { id: 'call:2', type: 'function', function: { name: 'browser_back', arguments: 'not json' } },
+    ] },
+    { role: 'tool', tool_call_id: 'call:1', content: 'r1' },
+    { role: 'tool', tool_call_id: 'call:2', content: '' },
+    { role: 'assistant', content: '' },
+    { role: 'user', content: 'ありがとう' },
+  ]);
+  assert.deepEqual(out, [
+    { role: 'user', content: 'こんにちは' },
+    { role: 'assistant', content: claudeContent },
+    { role: 'user', content: '調べて' },
+    { role: 'assistant', content: [
+      { type: 'tool_use', id: 'call_1', name: 'web_search', input: { query: 'x' } },
+      { type: 'tool_use', id: 'call_2', name: 'browser_back', input: {} },
+    ] },
+    { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'call_1', content: 'r1' },
+      { type: 'tool_result', tool_use_id: 'call_2', content: '(空)' },
+    ] },
+    { role: 'user', content: 'ありがとう' },
+  ]);
+  assert.equal(toolId('toolu_01-AB'), 'toolu_01-AB');
+});
+
+test('fromClaudeMessage keeps the raw content and exposes tool calls', () => {
+  const content = [
+    { type: 'thinking', thinking: '', signature: 's' },
+    { type: 'text', text: '見てみるね' },
+    { type: 'tool_use', id: 'toolu_1', name: 'web_search', input: { query: '天気' } },
+  ];
+  assert.deepEqual(fromClaudeMessage(content), {
+    role: 'assistant',
+    content: '見てみるね',
+    _claude: content,
+    tool_calls: [{ id: 'toolu_1', type: 'function', function: { name: 'web_search', arguments: '{"query":"天気"}' } }],
+  });
+});
+
+test('chat sends Claude requests with fallbacks, adaptive thinking and per-role effort, and hides _claude from others', async () => {
+  process.env.TEST_CLAUDE = 'k';
+  config.providers.claude = { type: 'anthropic', apiKeyEnv: 'TEST_CLAUDE' };
+  config.effort = { coder: 'high' };
+  const sdk = fakeClaude([{ model: 'claude-opus-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }] }]);
+  const messages = [
+    { role: 'system', content: 'SYS' },
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'x', _claude: [{ type: 'text', text: 'x' }] },
+    { role: 'user', content: 'again' },
+  ];
+  const { message, used } = await chat(config, ['claude:claude-opus-5-5'], { messages, role: 'coder', claudeSdk: sdk });
+  assert.equal(used, 'claude:claude-opus-5-5');
+  assert.equal(message.content, 'ok');
+  const params = sdk.seen[0];
+  assert.equal(params.system, 'SYS');
+  assert.equal(params.fallbacks, 'default');
+  assert.ok(params.betas.includes('server-side-fallback-2026-07-01'));
+  assert.deepEqual(params.thinking, { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
+  assert.deepEqual(params.output_config, { effort: 'high' });
+  assert.equal(params.temperature, undefined);
+  assert.equal(params.messages.length, 3);
+
+  let sent;
+  const fetchImpl = async (url, init) => { sent = JSON.parse(init.body); return reply({ content: 'g' }); };
+  await chat(config, ['a:m'], { messages, fetchImpl });
+  assert.ok(sent.messages.every((m) => !('_claude' in m)));
+});
+
+test('chat moves past Claude on rate limits and refusals', async () => {
+  process.env.TEST_CLAUDE = 'k';
+  config.providers.claude = { type: 'anthropic', apiKeyEnv: 'TEST_CLAUDE' };
+  const rateLimit = new Anthropic.RateLimitError(429, {}, 'slow down', new Headers());
+  const fetchImpl = async () => reply({ content: 'free AI' });
+  const sdk = fakeClaude([rateLimit]);
+  const first = await chat(config, ['claude:c', 'a:m'], { messages: [], fetchImpl, claudeSdk: sdk });
+  assert.equal(first.used, 'a:m');
+  assert.deepEqual(usableEntries(config, ['claude:c']), []); // 回数制限中は休ませる
+
+  resetCooldowns();
+  const refused = fakeClaude([{ model: 'c', stop_reason: 'refusal', stop_details: { category: 'cyber' }, content: [] }]);
+  const second = await chat(config, ['claude:c', 'a:m'], { messages: [], fetchImpl, claudeSdk: refused });
+  assert.equal(second.used, 'a:m');
 });
 
 test('Conversation runs tools until the model answers and persists history', async () => {
@@ -167,6 +282,8 @@ test('Conversation runs tools until the model answers and persists history', asy
   assert.equal(fs.readFileSync(path.join(config.workspace, 'x.txt'), 'utf8'), 'ok');
   assert.equal(requests[0].messages[0].role, 'system');
   assert.match(requests[0].messages[0].content, /キャラクター/);
+  assert.match(requests[0].messages[1].content, /^\[現在 .+\]\nファイル作って$/);
+  assert.ok(requests.every((r) => r.messages[0].content === requests[0].messages[0].content)); // 固定
   assert.ok(requests[0].tools.some((t) => t.function.name === 'web_search'));
   const toolMsgs = requests[2].messages.filter((m) => m.role === 'tool');
   assert.deepEqual(toolMsgs.map((m) => m.tool_call_id), ['c1', 'c2']);
@@ -176,6 +293,8 @@ test('Conversation runs tools until the model answers and persists history', asy
   const reloaded = new Conversation(config);
   assert.equal(reloaded.messages.length, conv.messages.length);
   assert.deepEqual(reloaded.display().map((i) => i.type), ['user', 'text', 'tool', 'tool', 'text']);
+  assert.equal(reloaded.display()[0].text, 'ファイル作って');
+  assert.equal(reloaded.system, conv.system);
 });
 
 test('Conversation answers pending tool calls when aborted', async () => {

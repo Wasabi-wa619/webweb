@@ -85,12 +85,49 @@ function addScreenshot() {
   log.append(el);
 }
 
+const KEY_PAGES = {
+  ANTHROPIC_API_KEY: ['Claude (有料・おすすめ)', 'https://console.anthropic.com/settings/keys'],
+  GEMINI_API_KEY: ['Google Gemini (無料)', 'https://aistudio.google.com/apikey'],
+  GROQ_API_KEY: ['Groq (無料)', 'https://console.groq.com/keys'],
+  OPENROUTER_API_KEY: ['OpenRouter (無料)', 'https://openrouter.ai/keys'],
+};
+
+function settingsUrl(spaceId) {
+  return spaceId ? `https://huggingface.co/spaces/${spaceId}/settings` : null;
+}
+
+function showSetup(data) {
+  $('login').hidden = true;
+  $('app').hidden = true;
+  $('setup').hidden = false;
+  const link = $('setup-link');
+  const url = settingsUrl(data.spaceId);
+  if (url) link.href = url;
+  else link.removeAttribute('href');
+}
+
+// どの AI も使えないときに、キーの取り方と登録のしかたを出す
+function showNoAi(state) {
+  const banner = $('no-ai');
+  banner.hidden = state.roles.main?.length > 0;
+  if (banner.hidden) return;
+  const url = settingsUrl(state.spaceId);
+  const where = url ? `<a href="${url}" target="_blank" rel="noopener">Space の設定ページ</a>の「New secret」` : '環境変数';
+  const items = state.keys.map((k) => {
+    const [label, page] = KEY_PAGES[k] || [k, null];
+    return `<li>${page ? `<a href="${page}" target="_blank" rel="noopener">${label}</a>` : label} → Name: <code>${k}</code></li>`;
+  }).join('');
+  banner.innerHTML = `<b>AI のキーがまだありません。</b>どれか 1 つ取ってきて、${where}に登録してください (登録後は再起動を待ってから読み込み直し)。<ol>${items}</ol>`;
+}
+
 async function loadState() {
   const res = await api('/api/state');
+  if (res.status === 503) return showSetup(await res.json());
   if (res.status === 401) return showLogin();
   const state = await res.json();
   $('login').hidden = true;
   $('app').hidden = false;
+  showNoAi(state);
   const role = $('role');
   const current = role.value || 'main';
   role.replaceChildren(...Object.entries(state.roles).map(([name, chain]) => {

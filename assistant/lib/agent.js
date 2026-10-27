@@ -1,4 +1,6 @@
-// 会話の履歴を持ち、AI とツールのやり取りを繰り返す本体
+// 会話の履歴を持ち、AI とツールのやり取りを繰り返す本体。
+// システムプロンプトは会話の始めに作って固定し、履歴は後ろに足すだけにする
+// (Claude は前の内容が変わると、考えた跡やキャッシュを使えなくなるため)。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +9,12 @@ import { chat } from './llm.js';
 import { TOOL_DEFS, TOOL_NAMES, runTool, validateArgs } from './tools.js';
 
 const HISTORY_SENT = 60; // AI に送る直近のメッセージ数
+const TRIM_STEP = 20; // 古い履歴はこの数ずつまとめて落とす (毎回ずれると Claude のキャッシュが効かない)
+const TIME_RE = /^\[現在 [^\]]*\]\n/;
+
+function now() {
+  return new Date().toLocaleString('ja-JP', { timeZone: process.env.TZ || 'Asia/Tokyo' });
+}
 
 function readIfExists(file) {
   try {
@@ -17,9 +25,9 @@ function readIfExists(file) {
 }
 
 export function buildSystemPrompt(config) {
-  const character = readIfExists(path.join(ROOT, 'character.md'));
+  // Space の Variables に CHARACTER を入れれば、ファイルを書き換えなくてもキャラクターを変えられる
+  const character = process.env.CHARACTER?.trim() || readIfExists(path.join(ROOT, 'character.md'));
   const memory = readIfExists(path.join(config.dataDir, 'memory.md'));
-  const now = new Date().toLocaleString('ja-JP', { timeZone: process.env.TZ || 'Asia/Tokyo' });
   return [
     'あなたはユーザー専用のパーソナルAIアシスタントです。次のキャラクターになりきって話してください。',
     character,
@@ -30,15 +38,15 @@ export function buildSystemPrompt(config) {
     '- ask_ai で別の AI に相談する。',
     '- remember でユーザーについて覚える。',
     'ツールを使わずに済む雑談には、ツールを使わずにそのまま答える。',
+    'ユーザーの発言の先頭には [現在 日時] が付いている。日付や時刻が関わる話ではそれを使う。',
     memory ? `## ユーザーについて覚えていること\n${memory}` : '',
-    `## 現在の日時\n${now}`,
   ].filter(Boolean).join('\n\n');
 }
 
 // 送る履歴を直近だけに絞る。tool メッセージの途中から始まらないよう、user の発言から始める
-export function recentHistory(messages, limit = HISTORY_SENT) {
+export function recentHistory(messages, limit = HISTORY_SENT, step = TRIM_STEP) {
   if (messages.length <= limit) return messages;
-  let start = messages.length - limit;
+  let start = Math.ceil((messages.length - limit) / step) * step;
   while (start < messages.length && messages[start].role !== 'user') start++;
   return messages.slice(start);
 }
@@ -56,19 +64,24 @@ export class Conversation {
   constructor(config, id = 'main') {
     this.config = config;
     this.file = path.join(config.dataDir, `conversation-${id}.json`);
+    this.system = '';
     this.messages = [];
     try {
-      this.messages = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      this.system = saved.system || '';
+      this.messages = saved.messages || [];
     } catch {
       // 初回は空
     }
   }
 
   save() {
-    fs.writeFileSync(this.file, JSON.stringify(this.messages));
+    fs.writeFileSync(this.file, JSON.stringify({ system: this.system, messages: this.messages }));
   }
 
+  // キャラクター設定や長期記憶の変更は、新しい会話から反映される
   reset() {
+    this.system = '';
     this.messages = [];
     this.save();
   }
@@ -76,13 +89,16 @@ export class Conversation {
   // ユーザーの発言を受けて、AI が答え終わるまでツールを回す。
   // emit には画面に表示するための途中経過が届く
   async send(text, { role = 'main', emit = () => {}, signal } = {}) {
-    const chain = this.config.roles[role] || this.config.roles.main;
-    this.messages.push({ role: 'user', content: text });
+    if (!this.config.roles[role]) role = 'main';
+    const chain = this.config.roles[role];
+    this.system ||= buildSystemPrompt(this.config);
+    this.messages.push({ role: 'user', content: `[現在 ${now()}]\n${text}` });
     this.save();
     for (let step = 0; step < this.config.maxSteps; step++) {
       const { message, used } = await chat(this.config, chain, {
-        messages: [{ role: 'system', content: buildSystemPrompt(this.config) }, ...recentHistory(this.messages)],
+        messages: [{ role: 'system', content: this.system }, ...recentHistory(this.messages)],
         tools: TOOL_DEFS,
+        role,
         signal,
       });
       this.messages.push(message);
@@ -118,7 +134,7 @@ export class Conversation {
   display() {
     const items = [];
     for (const m of this.messages) {
-      if (m.role === 'user') items.push({ type: 'user', text: m.content });
+      if (m.role === 'user') items.push({ type: 'user', text: m.content.replace(TIME_RE, '') });
       else if (m.role === 'assistant') {
         if (m.content) items.push({ type: 'text', text: m.content });
         for (const c of m.tool_calls || []) {

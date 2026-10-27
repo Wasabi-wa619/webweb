@@ -4,14 +4,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, loadConfig } from './lib/config.js';
 import { Conversation } from './lib/agent.js';
-import { usableEntries } from './lib/llm.js';
+import { usableEntries, parseEntry } from './lib/llm.js';
 import * as browser from './lib/browser.js';
 
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 7860);
 const PASSWORD = process.env.APP_PASSWORD || '';
-// パスワードがないときは、外から触れないよう自分のマシンだけで待ち受ける
-const HOST = process.env.HOST || (PASSWORD ? '0.0.0.0' : '127.0.0.1');
+const ON_SPACES = Boolean(process.env.SPACE_ID); // Hugging Face Spaces の中で動いているか
+// パスワードがないときは、外から触れないよう自分のマシンだけで待ち受ける。
+// ただし Spaces では、設定の手順を画面に出すために外から見えるようにする (API は使えない)
+const SETUP_REQUIRED = !PASSWORD && ON_SPACES;
+const HOST = process.env.HOST || (PASSWORD || ON_SPACES ? '0.0.0.0' : '127.0.0.1');
 const TOKEN = PASSWORD ? crypto.createHmac('sha256', PASSWORD).update('webweb-assistant').digest('hex') : '';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png' };
@@ -19,6 +22,29 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const config = loadConfig();
 const conversation = new Conversation(config);
 let running = null; // 実行中の { controller }
+
+// キーのいらない AI (Ollama など) は、実際に動いているかを確かめる (30 秒だけ覚えておく)
+const reachableCache = new Map();
+async function reachable(baseUrl) {
+  const hit = reachableCache.get(baseUrl);
+  if (hit && hit.at > Date.now() - 30_000) return hit.ok;
+  const ok = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
+  reachableCache.set(baseUrl, { ok, at: Date.now() });
+  return ok;
+}
+
+// 画面に出す「いま使える AI」の一覧
+async function availableRoles() {
+  const roles = {};
+  for (const [name, chain] of Object.entries(config.roles)) {
+    roles[name] = [];
+    for (const entry of usableEntries(config, chain)) {
+      const p = config.providers[parseEntry(entry).provider];
+      if (p.apiKeyEnv || await reachable(p.baseUrl)) roles[name].push(entry);
+    }
+  }
+  return roles;
+}
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a));
@@ -85,6 +111,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return serveStatic(res, 'index.html');
     if (req.method === 'GET' && /^\/[\w.-]+\.(js|css)$/.test(url.pathname)) return serveStatic(res, url.pathname.slice(1));
 
+    if (SETUP_REQUIRED && url.pathname.startsWith('/api/')) {
+      return sendJson(res, 503, { setup: 'password', spaceId: process.env.SPACE_ID });
+    }
     if (url.pathname === '/api/login' && req.method === 'POST') {
       const { password } = await readJson(req);
       if (PASSWORD && !safeEqual(password ?? '', PASSWORD)) return sendJson(res, 401, { error: 'パスワードが違います' });
@@ -93,8 +122,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/') && !authorized(req)) return sendJson(res, 401, { error: 'ログインしてください' });
 
     if (url.pathname === '/api/state' && req.method === 'GET') {
-      const roles = Object.fromEntries(Object.entries(config.roles).map(([name, chain]) => [name, usableEntries(config, chain)]));
-      return sendJson(res, 200, { history: conversation.display(), roles, busy: Boolean(running) });
+      const roles = await availableRoles();
+      const keys = Object.values(config.providers).filter((p) => p.apiKeyEnv).map((p) => p.apiKeyEnv);
+      return sendJson(res, 200, { history: conversation.display(), roles, keys, spaceId: process.env.SPACE_ID || null, busy: Boolean(running) });
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
     if (url.pathname === '/api/stop' && req.method === 'POST') {
@@ -120,11 +150,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`assistant: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/`);
-  if (!PASSWORD) console.log('APP_PASSWORD が未設定なので、このマシンからだけ接続できます。');
-  for (const [name, chain] of Object.entries(config.roles)) {
-    const ok = usableEntries(config, chain);
+  if (SETUP_REQUIRED) console.log('APP_PASSWORD が未設定です。Space の Settings → Secrets で設定してください。');
+  else if (!PASSWORD) console.log('APP_PASSWORD が未設定なので、このマシンからだけ接続できます。');
+  for (const [name, ok] of Object.entries(await availableRoles())) {
     console.log(`  ${name}: ${ok.length ? ok.join(' → ') : '(使えるAIなし: APIキーを設定してください)'}`);
   }
 });

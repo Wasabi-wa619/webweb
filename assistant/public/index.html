@@ -15,12 +15,23 @@
     <p id="login-error" class="error"></p>
   </form>
 </div>
+<div id="setup" class="setup" hidden>
+  <h1>あと少しで使えます</h1>
+  <p>この画面に入るためのパスワードが、まだ決まっていません。</p>
+  <ol>
+    <li><a id="setup-link" target="_blank" rel="noopener">Space の設定ページ</a>を開きます</li>
+    <li>「Variables and secrets」の「New secret」を押します</li>
+    <li>Name に <code>APP_PASSWORD</code>、Value に好きなパスワードを入れて保存します</li>
+    <li>数十秒で再起動します。終わったらこのページを読み込み直してください</li>
+  </ol>
+</div>
 <div id="app" hidden>
   <header>
     <h1>マイAI</h1>
     <select id="role" title="どのAIの組み合わせで答えるか"></select>
     <button id="reset" type="button" title="会話を最初からやり直す">新しい会話</button>
   </header>
+  <div id="no-ai" class="banner" hidden></div>
   <main id="log"></main>
   <form id="composer">
     <textarea id="input" rows="2" placeholder="話しかけてね (Ctrl+Enter で送信)"></textarea>

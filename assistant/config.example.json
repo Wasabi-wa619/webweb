@@ -1,5 +1,9 @@
 {
   "providers": {
+    "claude": {
+      "type": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    },
     "gemini": {
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
       "apiKeyEnv": "GEMINI_API_KEY"
@@ -18,12 +22,14 @@
   },
   "roles": {
     "main": [
+      "claude:claude-opus-5-5",
       "gemini:gemini-2.5-flash",
       "groq:openai/gpt-oss-120b",
       "openrouter:openrouter/free",
       "ollama:qwen3:1.7b"
     ],
     "coder": [
+      "claude:claude-opus-5-5",
       "groq:openai/gpt-oss-120b",
       "gemini:gemini-2.5-flash",
       "openrouter:openrouter/free",
@@ -35,5 +41,10 @@
       "ollama:qwen3:1.7b"
     ]
   },
-  "maxSteps": 25
+  "maxSteps": 25,
+  "effort": {
+    "main": "medium",
+    "coder": "high",
+    "fast": "low"
+  }
 }

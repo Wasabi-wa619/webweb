@@ -163,7 +163,7 @@ export async function runTool(name, args, ctx) {
     case 'ask_ai': {
       const chain = config.roles[args.role];
       if (!chain) throw new Error(`その役割はありません。使えるもの: ${Object.keys(config.roles).join(', ')}`);
-      const { message, used } = await chat(config, chain, { messages: [{ role: 'user', content: args.prompt }], signal });
+      const { message, used } = await chat(config, chain, { messages: [{ role: 'user', content: args.prompt }], role: args.role, signal });
       return `(${used} の回答)\n${message.content}`;
     }
     case 'remember': {
